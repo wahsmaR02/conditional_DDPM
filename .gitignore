@@ -1,3 +1,18 @@
+# Ignore large data and generated files
+*.mha
+*.nii.gz
+*.png
+.DS_Store
+
+# Ignore preprocessed data folders
+synthRAD2025_Task2_Train/
+brain_nii/
+Checkpoints/
+
+# Ignore Python environment
+.venv/
+__pycache__/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
