@@ -24,7 +24,7 @@ Playground/AB/AB001/...
 
 Or change the command to tell the script what cohorts to look in:
 
-python export_to_nii.py \
+python Dataloader.py \
   --root "synthRAD2025_Task2_Train/Playground" \
   --out "./brain_nii" \
   --split train \
