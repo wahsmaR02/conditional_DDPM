@@ -13,9 +13,9 @@ from torchvision import datasets #V
 from torchvision.utils import save_image
 from torch.autograd import Variable #V
 
-from Diffusion import GaussianDiffusionSampler_cond
+from Diffusion_condition import GaussianDiffusionSampler_cond
 from Model_condition import UNet
-from datasets_brain import * #V
+from datasets import * #V
 
 dataset_name="brain"
 out_name="trial_1"
@@ -36,9 +36,9 @@ device = torch.device("cuda:0")
 # Create sample directories
 os.makedirs("test/%s" % out_name, exist_ok=True)
 
-# Test data loader
+# Test data loader (uses .nii.gz slices)
 test_dataloader = DataLoader(
-    ImageDataset("./%s" % dataset_name, transforms_=False, unaligned=True, mode="test"),
+    ImageDatasetNii(root="./brain_nii", split="train"),
     batch_size=1,
     shuffle=False,
     num_workers=0,
@@ -76,5 +76,3 @@ print("model load weight done.")
 net_model.eval()
 sampler = GaussianDiffusionSampler_cond(net_model,beta_1,beta_T,T).to(device)
 test()
-    
-    
