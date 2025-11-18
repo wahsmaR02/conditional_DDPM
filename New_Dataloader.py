@@ -126,7 +126,7 @@ def split_patients(patients, train_frac=0.65, val_frac=0.10, seed=42):
 # Slicing & export (with mask)
 # ==============================
 
-def slice_and_export_patient(pinfo, out_root, split, size=256, skip=5):
+def slice_and_export_patient(pinfo, out_root, split, size=256):
     """
     For one patient:
       - load cbct.mha, ct.mha, mask.mha
@@ -171,12 +171,14 @@ def slice_and_export_patient(pinfo, out_root, split, size=256, skip=5):
     base_id = f"{cohort}_{pid}"
 
     # Skip slices at beginning and end
-    start_z = max(skip, 0)
-    end_z   = max(Z - skip, start_z + 1)  # ensure at least 1 slice if small
-    for z in range(start_z, end_z):
+    for z in range(Z):
         slice_cbct = cbct[z]
         slice_ct   = ct[z]
         slice_mask = mask[z]
+
+        if slice_cbct.mean() < -0.9:
+            # Mostly air slice, skip
+            continue
 
         # Crop using mask
         slice_cbct = crop_with_mask(slice_cbct, slice_mask)
