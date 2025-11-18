@@ -15,20 +15,3 @@ If you find it helpful to your project, please cite our paper: Peng J, Qiu RLJ, 
 The script for the inference stage has been uploaded.
 - Test_condition.py
 
-If your playground has no HN/TH/AB layer (for example Playground/AB001/...), either:
-
-Move patients under an AB folder:
-
-Playground/AB/AB001/...
-
-
-Or change the command to tell the script what cohorts to look in:
-
-python Dataloader.py \
-  --root "synthRAD2025_Task2_Train/Playground" \
-  --out "./brain_nii" \
-  --split train \
-  --size 256
-
-
-(and update the script to auto-discover cohorts or search all subfolders)
