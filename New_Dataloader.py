@@ -56,7 +56,7 @@ def pad_or_crop_to(arr, h=256, w=256):
     left = pw // 2; right = pw - left
 
     if ph > 0 or pw > 0:
-        cropped = np.pad(cropped, ((top, bottom), (left, right)), mode="edge")
+        cropped = np.pad(cropped, ((top, bottom), (left, right)), mode="constant", constant_values=-1)
 
     return cropped.astype(np.float32)
 
