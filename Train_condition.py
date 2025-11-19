@@ -15,7 +15,7 @@ from torch.autograd import Variable #V
 
 from Diffusion_condition import GaussianDiffusionTrainer_cond
 from Model_condition import UNet
-from datasets_brain import * #V
+from datasets import * #V
 
 
 dataset_name="brain"
@@ -39,7 +39,8 @@ device = torch.device("cuda")
 
 os.makedirs("%s" % save_weight_dir, exist_ok=True)
 train_dataloader = DataLoader(
-    ImageDataset("./%s" % dataset_name, transforms_=False, unaligned=True),
+    #ImageDataset("./%s" % dataset_name, transforms_=False, unaligned=True),
+    ImageDatasetNii_25D("./%s" % dataset_name, split="train", k=1),
     batch_size=batch_size,
     shuffle=True,
     num_workers=0,
@@ -56,9 +57,16 @@ for epoch in range(n_epochs):
     for i, batch in enumerate(train_dataloader):
         i = i + 1
         optimizer.zero_grad()
-        ct = Variable(batch["pCT"].type(Tensor))
-        cbct = Variable(batch["CBCT"].type(Tensor)) #condition
-        x_0 = torch.cat((ct,cbct),1)
+        #ct = Variable(batch["pCT"].type(Tensor))
+        #cbct = Variable(batch["CBCT"].type(Tensor)) #condition
+        #x_0 = torch.cat((ct,cbct),1)
+
+        # ------ For 2.5D ------
+        ct   = Variable(batch["CT"].type(Tensor))        # [3,H,W]
+        cbct = Variable(batch["CBCT"].type(Tensor))      # [3,H,W]
+        # concatenate into 6-channel input
+        x_0 = torch.cat((ct, cbct), dim=1)               # [6,H,W]
+        
         loss = trainer(x_0)
         loss_save = loss_save + loss/65536
         loss.backward()

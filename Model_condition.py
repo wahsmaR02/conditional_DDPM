@@ -160,7 +160,9 @@ class UNet(nn.Module):
         tdim = ch * 4
         self.time_embedding = TimeEmbedding(T, ch, tdim)
 
-        self.head = nn.Conv2d(2, ch, kernel_size=3, stride=1, padding=1)
+        # Go from 2D -> 2.5D, 3 slices: z-1, z, z+1
+        N = 3
+        self.head = nn.Conv2d(2*N, ch, kernel_size=3, stride=1, padding=1)
         self.downblocks = nn.ModuleList()
         chs = [ch]
         now_ch = ch

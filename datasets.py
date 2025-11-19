@@ -1,4 +1,3 @@
-# Jan. 2023, by Junbo Peng, PhD Candidate, Georgia Tech
 import glob
 import random
 import os
@@ -10,28 +9,94 @@ from PIL import Image
 import torchvision.transforms as transforms
 import SimpleITK as sitk
 
-class ImageDataset(Dataset):
-    def __init__(self, root, transforms_=None, unaligned=False, mode="train"):
-        self.transform = transforms.Compose(transforms_)
-        self.unaligned = unaligned
+# A new class to obtain 2.5D Architecture
+class ImageDatasetNii_25D(Dataset):
+    """
+    Loads 2.5D stacks:
+      CT_stack:   [3,H,W]
+      CBCT_stack: [3,H,W]
+      mask:       [1,H,W] (center slice only)
+    """
+    def __init__(self, root, split="train", k=1):
+        self.k = k   # 1 → 3 slices
+        self.files_CT = sorted(glob.glob(os.path.join(root, split, "a", "*.nii.gz")))
+        self.files_CBCT = sorted(glob.glob(os.path.join(root, split, "b", "*.nii.gz")))
+        self.files_mask = sorted(glob.glob(os.path.join(root, split, "m", "*.nii.gz")))
 
-        self.files_A = sorted(glob.glob(os.path.join(root, "%s/a" % mode) + "/*.*"))
-        self.files_B = sorted(glob.glob(os.path.join(root, "%s/b" % mode) + "/*.*"))
+        assert len(self.files_CT) == len(self.files_CBCT) == len(self.files_mask)
 
-    def __getitem__(self, index):
+        # Extract patient id + slice index
+        self.meta = []
+        for f in self.files_CT:
+            base = os.path.basename(f)
+            pid, zstr = base.split("_z")
+            z = int(zstr.split(".")[0])
+            self.meta.append((pid, z))
 
-        image_A = np.load(self.files_A[index % len(self.files_A)],allow_pickle=True)
-        image_B = np.load(self.files_B[index % len(self.files_B)],allow_pickle=True)
+        # Group files by patient
+        self.by_patient_CT = {}
+        self.by_patient_CBCT = {}
+        self.by_patient_mask = {}
 
-        item_A = torch.from_numpy(image_A)
-        item_B = torch.from_numpy(image_B)
-        
-        item_A = torch.unsqueeze(item_A,0)
-        item_B = torch.unsqueeze(item_B,0)
-        return {"a": item_A, "b": item_B}
+        for ct_f, cb_f, m_f in zip(self.files_CT, self.files_CBCT, self.files_mask):
+            base = os.path.basename(ct_f)
+            pid, _ = base.split("_z")
+            self.by_patient_CT.setdefault(pid, []).append(ct_f)
+            self.by_patient_CBCT.setdefault(pid, []).append(cb_f)
+            self.by_patient_mask.setdefault(pid, []).append(m_f)
+
+        # Sort by slice index inside each patient
+        def sort_by_z(lst):
+            return sorted(lst, key=lambda f: int(os.path.basename(f).split("_z")[1].split(".")[0]))
+
+        for pid in self.by_patient_CT:
+            self.by_patient_CT[pid] = sort_by_z(self.by_patient_CT[pid])
+            self.by_patient_CBCT[pid] = sort_by_z(self.by_patient_CBCT[pid])
+            self.by_patient_mask[pid] = sort_by_z(self.by_patient_mask[pid])
+
+    def load_slice(self, path):
+        arr = sitk.GetArrayFromImage(sitk.ReadImage(path)).astype(np.float32)
+        if arr.ndim == 3:
+            arr = arr[0]
+        return arr
 
     def __len__(self):
-        return max(len(self.files_A), len(self.files_B))
+        return len(self.files_CT)
+
+    def __getitem__(self, idx):
+        ct_path = self.files_CT[idx]
+        base = os.path.basename(ct_path)
+        pid, zstr = base.split("_z")
+        z = int(zstr.split(".")[0])
+
+        ct_list   = self.by_patient_CT[pid]
+        cbct_list = self.by_patient_CBCT[pid]
+        mask_list = self.by_patient_mask[pid]
+
+        Z = len(ct_list)
+
+        def clamp(i):
+            return max(0, min(Z - 1, i))
+
+        ct_stack = []
+        cbct_stack = []
+
+        for dz in [-1, 0, 1]:     # 3 slices → z-1, z, z+1
+            zz = clamp(z + dz)
+            ct_stack.append(self.load_slice(ct_list[zz]))
+            cbct_stack.append(self.load_slice(cbct_list[zz]))
+
+        mask = self.load_slice(mask_list[z])  # center-slice mask
+
+        ct_stack    = torch.tensor(np.stack(ct_stack), dtype=torch.float32)
+        cbct_stack  = torch.tensor(np.stack(cbct_stack), dtype=torch.float32)
+        mask_tensor = torch.tensor(mask, dtype=torch.float32).unsqueeze(0)
+
+        return {
+            "CT": ct_stack,             # [3,H,W]
+            "CBCT": cbct_stack,         # [3,H,W]
+            "mask": mask_tensor         # [1,H,W]
+        }
 
 # -------------------------------------------------------------------
 # New dataset class for .nii.gz slices (preferred for SynthRAD)
@@ -47,11 +112,13 @@ class ImageDatasetNii(Dataset):
     def __init__(self, root, split="train"):
         self.files_A = sorted(glob.glob(os.path.join(root, split, "a", "*.nii.gz")))
         self.files_B = sorted(glob.glob(os.path.join(root, split, "b", "*.nii.gz")))
+        self.files_m = sorted(glob.glob(os.path.join(root, split, "m", "*.nii.gz")))
         assert len(self.files_A) == len(self.files_B) > 0, f"No pairs found in {root}/{split}"
 
         # Ensure filenames match 1–1
         a_base = [os.path.basename(f) for f in self.files_A]
         b_base = [os.path.basename(f) for f in self.files_B]
+        #m_base = [os.path.basename(f) for f in self.files_m]
         assert a_base == b_base, "CT and CBCT filenames do not match"
 
     def __len__(self):
@@ -60,17 +127,23 @@ class ImageDatasetNii(Dataset):
     def __getitem__(self, idx):
         ct_path = self.files_A[idx]
         cbct_path = self.files_B[idx]
+        mask_path = self.files_m[idx]
 
         # Read .nii.gz slice as float32 array
         ct = sitk.GetArrayFromImage(sitk.ReadImage(ct_path)).astype(np.float32)
         cbct = sitk.GetArrayFromImage(sitk.ReadImage(cbct_path)).astype(np.float32)
+        mask = sitk.GetArrayFromImage(sitk.ReadImage(mask_path)).astype(np.float32)
 
         # Each file is (1,H,W) -> squeeze and re-add channel
         if ct.ndim == 3 and ct.shape[0] == 1:
             ct = ct[0]
         if cbct.ndim == 3 and cbct.shape[0] == 1:
             cbct = cbct[0]
+        if mask.ndim == 3 and mask.shape[0] == 1:
+            mask = mask[0]
 
         ct_tensor = torch.from_numpy(ct).unsqueeze(0)    # [1,H,W]
         cbct_tensor = torch.from_numpy(cbct).unsqueeze(0)  # [1,H,W]
-        return {"pCT": ct_tensor, "CBCT": cbct_tensor}
+        mask_tensor = torch.from_numpy(mask).unsqueeze(0)
+
+        return {"pCT": ct_tensor, "CBCT": cbct_tensor, "mask": mask_tensor}

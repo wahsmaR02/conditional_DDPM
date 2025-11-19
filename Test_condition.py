@@ -38,7 +38,8 @@ os.makedirs("test/%s" % out_name, exist_ok=True)
 
 # Test data loader (uses .nii.gz slices)
 test_dataloader = DataLoader(
-    ImageDatasetNii(root="./brain_nii", split="train"),
+    #ImageDatasetNii(root="./brain_nii", split="train"),
+    ImageDatasetNii_25D(root="./brain_nii", split="train", k=1),
     batch_size=1,
     shuffle=False,
     num_workers=0,
@@ -51,18 +52,47 @@ def test():
         for ii, batch1 in enumerate(test_dataloader):
             ii = ii + 1
             print(ii)
-            ct = Variable(batch1["pCT"].type(Tensor))
-            cbct = Variable(batch1["CBCT"].type(Tensor)) #condition    
-            noisyImage = torch.randn(size=[1, 1, 256, 256], device=device)
-            x_in = torch.cat((noisyImage,cbct),1)
+            #ct = Variable(batch1["pCT"].type(Tensor))
+            #cbct = Variable(batch1["CBCT"].type(Tensor)) #condition 
+
+            # Stack ct & cbct
+            ct_stack = Variable(batch1["CT"].type(Tensor))         # [1,3,H,W]
+            cbct_stack = Variable(batch1["CBCT"].type(Tensor))     # [1,3,H,W]
+   
+            #noisyImage = torch.randn(size=[1, 1, 256, 256], device=device)
+            #x_in = torch.cat((noisyImage,cbct),1)
+
+            # ----------- For 2.5D -----------
+            # 1) noise ONLY the center CT slice
+            noisy_center = torch.randn_like(ct_stack[:,1:2,:,:])   # [1,1,H,W]
+
+            # 2) build the 5-channel condition
+            cond = torch.cat([
+                ct_stack[:,0:1,:,:],     # CT z-1
+                ct_stack[:,2:3,:,:],     # CT z+1
+                cbct_stack               # CBCT stack (3 slices)
+            ], dim=1)                    # total 5 channels
+
+            # 3) full 6-channel input
+            x_in = torch.cat((noisy_center, cond), dim=1)
+
             x_out = sampler(x_in)
             
             # “inverse the normalized image to HU value”
             
-            fake = x_out[:,0,:,:]
-            fake = torch.unsqueeze(fake,1)
+            #fake = x_out[:,0,:,:]
+            #fake = torch.unsqueeze(fake,1)
 
-            img = torch.cat((cbct,fake,ct),3)
+            #img = torch.cat((cbct,fake,ct),3)
+
+            # -------- 2.5D --------
+            fake = x_out[:,0,:,:].unsqueeze(1)                  # predicted CT(z)
+            img  = torch.cat((
+                cbct_stack[:,1:2,:,:],   # CBCT center slice
+                fake,                    # predicted CT center
+                ct_stack[:,1:2,:,:]      # GT CT center slice
+            ), dim=3)
+
             img = img.cpu()
             img_save = torch.cat((img_save,img),1)
             img_tst = img_save.numpy()
