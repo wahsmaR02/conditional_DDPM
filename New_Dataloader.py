@@ -7,16 +7,13 @@ import SimpleITK as sitk
 # ==============================
 
 # Root folder with HN/TH/AB subfolders (each with patient folders)
-ROOT_DIR = "synthRAD2025_Task2_Train/playground"  # <-- CHANGE THIS
+ROOT_DIR = "playground"  # <-- CHANGE THIS
 
 # Output folder for final .nii.gz slices
 OUT_DIR = "./Sliced_nii"
 
 # Target slice size (H = W)
-SLICE_SIZE = 256
-
-# How many slices to skip at each end of the volume
-SKIP_SLICES = 5
+SLICE_SIZE = 512
 
 # Cohorts present in your dataset
 COHORTS = ("HN", "TH", "AB")
@@ -24,12 +21,11 @@ COHORTS = ("HN", "TH", "AB")
 # Random seed for reproducible patient-wise split
 SPLIT_SEED = 42
 
-
 # ==============================
 # Preprocessing helpers
 # ==============================
 
-def norm_hu(arr, lo=-1000, hi=2000):
+def norm_hu(arr, lo=-1024, hi=2000):
     """
     Clip Hounsfield units to [lo, hi] and scale to [-1,1].
     -1000 ~ air, up to ~2000 ~ dense bone.
@@ -38,9 +34,10 @@ def norm_hu(arr, lo=-1000, hi=2000):
     return (2.0 * (arr - lo) / (hi - lo) - 1.0).astype(np.float32)
 
 
-def pad_or_crop_to(arr, h=256, w=256):
+def pad_or_crop_to(arr, h=SLICE_SIZE, w=SLICE_SIZE, pad_value=-1):
     """
     Center-crop or pad a 2D slice to size (h, w).
+    pad_value: value to use for padding (default: -1 for air CB/CBCT and 0 for mask)
     """
     H, W = arr.shape
 
@@ -56,7 +53,7 @@ def pad_or_crop_to(arr, h=256, w=256):
     left = pw // 2; right = pw - left
 
     if ph > 0 or pw > 0:
-        cropped = np.pad(cropped, ((top, bottom), (left, right)), mode="constant", constant_values=-1)
+        cropped = np.pad(cropped, ((top, bottom), (left, right)), mode="constant", constant_values=-pad_value)
 
     return cropped.astype(np.float32)
 
@@ -103,7 +100,7 @@ def collect_patients(root, cohorts=COHORTS):
     return patients
 
 
-def split_patients(patients, train_frac=0.65, val_frac=0.10, seed=42):
+def split_patients(patients, train_frac=0.80, val_frac=0.20, seed=42):
     """
     Patient-wise random split into train/val/test.
     """
@@ -113,20 +110,18 @@ def split_patients(patients, train_frac=0.65, val_frac=0.10, seed=42):
     N = len(patients)
     n_train = int(round(train_frac * N))
     n_val   = int(round(val_frac * N))
-    n_test  = N - n_train - n_val
 
     train_pat = patients[:n_train]
     val_pat   = patients[n_train:n_train + n_val]
-    test_pat  = patients[n_train + n_val:]
 
-    return train_pat, val_pat, test_pat
+    return train_pat, val_pat
 
 
 # ==============================
 # Slicing & export (with mask)
 # ==============================
 
-def slice_and_export_patient(pinfo, out_root, split, size=256):
+def slice_and_export_patient(pinfo, out_root, split, size=SLICE_SIZE):
     """
     For one patient:
       - load cbct.mha, ct.mha, mask.mha
@@ -156,6 +151,7 @@ def slice_and_export_patient(pinfo, out_root, split, size=256):
     if cbct.shape != ct.shape or cbct.shape != mask.shape:
         print(f"⚠️  Shape mismatch for {cohort}/{pid}, skipping.")
         return
+    
 
     # Normalize to [-1,1]
     cbct = norm_hu(cbct)
@@ -165,16 +161,21 @@ def slice_and_export_patient(pinfo, out_root, split, size=256):
 
     out_a = os.path.join(out_root, split, "a")  # CT
     out_b = os.path.join(out_root, split, "b")  # CBCT
+    out_m = os.path.join(out_root, split, "m")  # Mask
     os.makedirs(out_a, exist_ok=True)
     os.makedirs(out_b, exist_ok=True)
+    os.makedirs(out_m, exist_ok=True)
 
     base_id = f"{cohort}_{pid}"
 
-    # Skip slices at beginning and end
     for z in range(Z):
         slice_cbct = cbct[z]
         slice_ct   = ct[z]
         slice_mask = mask[z]
+        #print(slice_cbct.mean())
+        #print(Z)
+        #print(base_id)
+        #print("_____")
 
         if slice_cbct.mean() < -0.9:
             # Mostly air slice, skip
@@ -184,20 +185,26 @@ def slice_and_export_patient(pinfo, out_root, split, size=256):
         slice_cbct = crop_with_mask(slice_cbct, slice_mask)
         slice_ct   = crop_with_mask(slice_ct,   slice_mask)
 
+          # --- Crop mask by its own bounding box ---
+        slice_mask = crop_with_mask(slice_mask, slice_mask)
+
         # Then pad/crop to target size
         slice_cbct = pad_or_crop_to(slice_cbct, size, size)
         slice_ct   = pad_or_crop_to(slice_ct,   size, size)
-
+        slice_mask = pad_or_crop_to(slice_mask, size, size, pad_value=0)
+    
         # Convert back to SimpleITK images
         cbct_img = sitk.GetImageFromArray(slice_cbct)
         ct_img   = sitk.GetImageFromArray(slice_ct)
+        mask_img = sitk.GetImageFromArray(slice_mask)
 
         fname = f"{base_id}_z{z:03d}.nii.gz"
         sitk.WriteImage(cbct_img, os.path.join(out_b, fname))
         sitk.WriteImage(ct_img,   os.path.join(out_a, fname))
+        sitk.WriteImage(mask_img, os.path.join(out_m, fname))
 
 
-def export_all(root, out, size=256, cohorts=COHORTS, skip=SKIP_SLICES, seed=SPLIT_SEED):
+def export_all(root, out, size=256, cohorts=COHORTS, seed=SPLIT_SEED):
     """
     Collect patients, split them 70/15/15 by patient, and
     export slices for train/val/test under out/.
@@ -207,7 +214,7 @@ def export_all(root, out, size=256, cohorts=COHORTS, skip=SKIP_SLICES, seed=SPLI
         raise RuntimeError(f"No patients found under {root} (cohorts={cohorts})")
 
     print(f"📁 Found {len(patients)} patients total.")
-    train_pat, val_pat, test_pat = split_patients(
+    train_pat, val_pat = split_patients(
         patients,
         train_frac=0.7,
         val_frac=0.15,
@@ -215,12 +222,10 @@ def export_all(root, out, size=256, cohorts=COHORTS, skip=SKIP_SLICES, seed=SPLI
     )
     print(f" Train: {len(train_pat)} patients")
     print(f" Val:   {len(val_pat)} patients")
-    print(f" Test:  {len(test_pat)} patients")
 
     splits = {
         "train": train_pat,
         "val":   val_pat,
-        "test":  test_pat,
     }
 
     for split_name, plist in splits.items():
@@ -231,15 +236,12 @@ def export_all(root, out, size=256, cohorts=COHORTS, skip=SKIP_SLICES, seed=SPLI
                 out_root=out,
                 split=split_name,
                 size=size,
-                skip=skip,
             )
 
     print("\n Done!")
     print(f"   Slices saved as .nii.gz under:")
     print(f"   {out}/train/a,b")
     print(f"   {out}/val/a,b")
-    print(f"   {out}/test/a,b")
-
 
 # ==============================
 # Run once
@@ -251,6 +253,5 @@ if __name__ == "__main__":
         out=OUT_DIR,
         size=SLICE_SIZE,
         cohorts=COHORTS,
-        skip=SKIP_SLICES,
         seed=SPLIT_SEED,
     )
