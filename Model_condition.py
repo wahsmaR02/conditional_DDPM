@@ -153,12 +153,18 @@ class ResBlock(nn.Module):
         h = self.attn(h)
         return h
 
-class UNet(nn.Module):
-    def __init__(self, T, ch, ch_mult, attn, num_res_blocks, dropout):
+class UNet25D(nn.Module):
+    def __init__(self, T, ch, ch_mult, attn, num_res_blocks, dropout, num_slices=1):
+        '''
+        num_slices = K = number of axial slices per modality.
+        Input channels = 2 * num_slices (CT + CBCT)
+        '''
         super().__init__()
         assert all([i < len(ch_mult) for i in attn]), 'attn index out of bound'
         tdim = ch * 4
         self.time_embedding = TimeEmbedding(T, ch, tdim)
+
+        in_channels = 2 * num_slices  # 2 modalities: CT and CBCT
 
         self.head = nn.Conv2d(2, ch, kernel_size=3, stride=1, padding=1)
         self.downblocks = nn.ModuleList()

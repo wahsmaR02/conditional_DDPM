@@ -6,17 +6,16 @@ import datetime
 import sys
 
 import torch
-import torch.optim as optim
 from torch.utils.data import DataLoader
-from torchvision import transforms
-from torchvision import datasets #V
 from torchvision.utils import save_image
 from torch.autograd import Variable #V
 
 from Diffusion_condition import GaussianDiffusionTrainer_cond
-from Model_condition import UNet
-from datasets_brain import * #V
+from Model_condition import UNet25D
+from Datasets25D import ImageDatasetNii25D
 
+num_slices = 3  # Using 3 slices (center slice + 1 above + 1 below)
+half_width = (num_slices-1) // 2
 
 dataset_name="brain"
 out_name="trial_1"
@@ -39,13 +38,13 @@ device = torch.device("cuda")
 
 os.makedirs("%s" % save_weight_dir, exist_ok=True)
 train_dataloader = DataLoader(
-    ImageDataset("./%s" % dataset_name, transforms_=False, unaligned=True),
+    ImageDatasetNii25D("./%s" % dataset_name, transforms_=False, unaligned=True),
     batch_size=batch_size,
     shuffle=True,
     num_workers=0,
 )
 
-net_model = UNet(T, ch, ch_mult, attn, num_res_blocks, dropout).to(device)
+net_model = UNet25D(T, ch, ch_mult, attn, num_res_blocks, dropout, num_slices=num_slices).to(device)
 optimizer = torch.optim.AdamW(net_model.parameters(), lr=1e-4, betas=(0.9,0.999), eps=1e-8, weight_decay=0)
 trainer = GaussianDiffusionTrainer_cond(net_model, beta_1, beta_T, T).to(device)
 
@@ -58,7 +57,7 @@ for epoch in range(n_epochs):
         optimizer.zero_grad()
         ct = Variable(batch["pCT"].type(Tensor))
         cbct = Variable(batch["CBCT"].type(Tensor)) #condition
-        x_0 = torch.cat((ct,cbct),1)
+        x_0 = torch.cat((ct,cbct),dim=1)
         loss = trainer(x_0)
         loss_save = loss_save + loss/65536
         loss.backward()

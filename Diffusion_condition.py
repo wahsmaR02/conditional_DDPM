@@ -129,9 +129,15 @@ class GaussianDiffusionTrainer_cond(nn.Module):
         self.register_buffer('sqrt_one_minus_alphas_bar', torch.sqrt(1. - alphas_bar))
 
     def forward(self, x_0):
-        t = torch.randint(self.T, size=(x_0.shape[0], ), device=x_0.device)
-        ct = x_0[:,0,:,:].unsqueeze(1)
-        cbct = x_0[:,1,:,:].unsqueeze(1)
+        # x_0: [B, 2, H, W]  (ct, cbct)
+        B, C, H, W = x_0.shape
+        assert C % 2 == 0, "Input channel must be even (ct + cbct)."
+        K = C // 2
+
+
+        t = torch.randint(self.T, size=(B, ), device=x_0.device)
+        ct = x_0[:,:K,:,:].unsqueeze(1)
+        cbct = x_0[:,K:,:,:].unsqueeze(1)
         noise = torch.randn_like(ct)
         x_t = (extract(self.sqrt_alphas_bar, t, ct.shape) * ct +
                extract(self.sqrt_one_minus_alphas_bar, t, ct.shape) * noise)
@@ -157,15 +163,18 @@ class GaussianDiffusionSampler_cond(nn.Module):
         self.register_buffer('posterior_var', self.betas * (1. - alphas_bar_prev) / (1. - alphas_bar))
 
     def predict_xt_prev_mean_from_eps(self, x_t, t, eps):
-        ct = x_t[:,0,:,:].unsqueeze(1)
-        cbct = x_t[:,1,:,:].unsqueeze(1)
+        B, C, H, W = x_t.shape
+        K = C // 2
+        ct = x_t[:,:K,:,:]
         assert ct.shape == eps.shape
         return (extract(self.coeff1, t, ct.shape) * ct -
                 extract(self.coeff2, t, ct.shape) * eps)
 
     def p_mean_variance(self, x_t, t):
-        ct = x_t[:,0,:,:].unsqueeze(1)
-        cbct = x_t[:,1,:,:].unsqueeze(1)
+        B, C, H, W = x_t.shape
+        K = C // 2
+        ct = x_t[:,:K,:,:]
+        
         var_schedule = torch.cat([self.posterior_var[1:2], self.betas[1:]])
         var = extract(var_schedule, t, ct.shape)
         eps = self.model(x_t, t)
@@ -174,8 +183,10 @@ class GaussianDiffusionSampler_cond(nn.Module):
 
     def forward(self, x_T):
         x_t = x_T
-        ct = x_t[:,0,:,:].unsqueeze(1)
-        cbct = x_t[:,1,:,:].unsqueeze(1)
+        B, C, H, W = x_t.shape
+        K = C // 2
+        ct = x_t[:,:K,:,:]
+        cbct = x_t[:,K:,:,:]
         for time_step in reversed(range(self.T)):
             t = x_t.new_ones([x_T.shape[0], ], dtype=torch.long) * time_step
             mean, var = self.p_mean_variance(x_t=x_t, t=t)

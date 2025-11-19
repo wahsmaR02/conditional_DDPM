@@ -19,7 +19,7 @@ SLICE_SIZE = 512
 COHORTS = ("HN", "TH", "AB")
 
 # Random seed for reproducible patient-wise split
-SPLIT_SEED = 42
+SPLIT_SEED = 42 # behövs nog inte eftersom vi gör train/val split bara en gång
 
 # ==============================
 # Preprocessing helpers
@@ -53,7 +53,7 @@ def pad_or_crop_to(arr, h=SLICE_SIZE, w=SLICE_SIZE, pad_value=-1):
     left = pw // 2; right = pw - left
 
     if ph > 0 or pw > 0:
-        cropped = np.pad(cropped, ((top, bottom), (left, right)), mode="constant", constant_values=-pad_value)
+        cropped = np.pad(cropped, ((top, bottom), (left, right)), mode="constant", constant_values=pad_value)
 
     return cropped.astype(np.float32)
 
