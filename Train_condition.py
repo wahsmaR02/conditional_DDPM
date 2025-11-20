@@ -18,7 +18,7 @@ from Model_condition import UNet
 from datasets import * #V
 
 
-dataset_name="Sliced_nii"
+dataset_name="brain"
 out_name="trial_1"
 batch_size = 2
 T = 100
@@ -89,4 +89,8 @@ for epoch in range(n_epochs):
             loss_save.item(),
         )
     )
+    # ---- Save FINAL model after training ----
+    final_path = os.path.join(save_weight_dir, "model_final.pt")
+    torch.save(net_model.state_dict(), final_path)
+    print("\nFinal model saved to:", final_path)
     

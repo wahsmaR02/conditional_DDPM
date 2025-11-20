@@ -39,7 +39,7 @@ os.makedirs("test/%s" % out_name, exist_ok=True)
 # Test data loader (uses .nii.gz slices)
 test_dataloader = DataLoader(
     #ImageDatasetNii(root="./brain_nii", split="train"),
-    ImageDatasetNii_25D(root="./brain_nii", split="train", k=1),
+    ImageDatasetNii_25D(root="./brain", split="train", k=1),
     batch_size=1,
     shuffle=False,
     num_workers=0,
@@ -100,7 +100,8 @@ def test():
             img_tst.tofile("test/%s/%s.raw" % (out_name, "1000"))
 
 net_model = UNet(T, ch, ch_mult, attn, num_res_blocks, dropout).to(device)
-ckpt = torch.load(os.path.join(save_weight_dir, "ckpt_1000_.pt"), map_location=device)
+#ckpt = torch.load(os.path.join(save_weight_dir, "ckpt_1000_.pt"), map_location=device)
+ckpt = torch.load(os.path.join(save_weight_dir, "model_final.pt"), map_location=device)
 net_model.load_state_dict(ckpt)
 print("model load weight done.")
 net_model.eval()

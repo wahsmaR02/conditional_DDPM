@@ -10,7 +10,7 @@ import SimpleITK as sitk
 ROOT_DIR = "playground"  # <-- CHANGE THIS
 
 # Output folder for final .nii.gz slices
-OUT_DIR = "./Sliced_nii"
+OUT_DIR = "./brain"
 
 # Target slice size (H = W)
 SLICE_SIZE = 256
