@@ -18,24 +18,23 @@ from Model_condition import UNet
 from datasets import * #V
 
 
-dataset_name="brain"
+dataset_name="Sliced_nii"
 out_name="trial_1"
 batch_size = 2
-T = 1000
-ch = 128
-ch_mult = [1, 2, 3, 4]
+T = 100
+ch = 32
+ch_mult = [1, 2, 4]
 attn = [2]
 num_res_blocks = 2
 dropout = 0.3
 lr = 1e-4
-n_epochs = 1000
+n_epochs = 10
 beta_1 = 1e-4
 beta_T = 0.02
 grad_clip = 1
 save_weight_dir = "./Checkpoints/%s"%out_name
 
-Tensor = torch.cuda.FloatTensor
-device = torch.device("cuda")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 os.makedirs("%s" % save_weight_dir, exist_ok=True)
 train_dataloader = DataLoader(
@@ -62,8 +61,8 @@ for epoch in range(n_epochs):
         #x_0 = torch.cat((ct,cbct),1)
 
         # ------ For 2.5D ------
-        ct   = Variable(batch["CT"].type(Tensor))        # [3,H,W]
-        cbct = Variable(batch["CBCT"].type(Tensor))      # [3,H,W]
+        ct = batch["CT"].to(device)
+        cbct = batch["CBCT"].to(device)
         # concatenate into 6-channel input
         x_0 = torch.cat((ct, cbct), dim=1)               # [6,H,W]
         

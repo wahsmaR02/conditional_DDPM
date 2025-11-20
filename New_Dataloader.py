@@ -13,7 +13,7 @@ ROOT_DIR = "playground"  # <-- CHANGE THIS
 OUT_DIR = "./Sliced_nii"
 
 # Target slice size (H = W)
-SLICE_SIZE = 512
+SLICE_SIZE = 256
 
 # Cohorts present in your dataset
 COHORTS = ("HN", "TH", "AB")
@@ -189,7 +189,7 @@ def slice_and_export_patient(pinfo, out_root, split, size=SLICE_SIZE):
         slice_cbct = pad_or_crop_to(slice_cbct, size, size)
         slice_ct   = pad_or_crop_to(slice_ct,   size, size)
 
-        slice_mask = pad_or_crop_to(slice_mask, size, size, pad_value=0)
+        slice_mask = pad_or_crop_to(slice_mask, size, size, constant_values=0)
 
 
         # Convert back to SimpleITK images
