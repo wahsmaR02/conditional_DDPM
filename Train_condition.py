@@ -1,96 +1,127 @@
-# Jan. 2023, by Junbo Peng, PhD Candidate, Georgia Tech
+# Training script for 3D conditional DDPM (updated for patch-based 3D training)
+
 import os
-from typing import Dict
 import time
 import datetime
 import sys
 
 import torch
-import torch.optim as optim
 from torch.utils.data import DataLoader
-from torchvision import transforms
-from torchvision import datasets #V
-from torchvision.utils import save_image
-from torch.autograd import Variable #V
+from torch.autograd import Variable
 
-from Diffusion_condition import GaussianDiffusionTrainer_cond
-from Model_condition import UNet
-from datasets import * #V
+from Diffusion_condition_3D import GaussianDiffusionTrainer_cond
+from Model_condition_3D import UNet3D
+from datasets_new import ImageDatasetNii3D
 
 
-dataset_name="brain"
-out_name="trial_1"
+# --------------------------
+# Configuration
+# --------------------------
+
+dataset_root = "synthRAD2025_Task2_Train/playground"   # root folder containing HN/TH/AB
+patch_size = (64,128,128)
 batch_size = 2
-T = 100
-ch = 32
-ch_mult = [1, 2, 4]
-attn = [2]
+num_epochs = 200
+learning_rate = 1e-4
+grad_clip = 1.0
+
+T = 1000
+ch = 64
+ch_mult = [1, 2, 4, 4]
+attn = [1]
 num_res_blocks = 2
-dropout = 0.3
-lr = 1e-4
-n_epochs = 10
+dropout = 0.1
 beta_1 = 1e-4
 beta_T = 0.02
-grad_clip = 1
-save_weight_dir = "./Checkpoints/%s"%out_name
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+save_dir = "./Checkpoints_3D"
+os.makedirs(save_dir, exist_ok=True)
 
-os.makedirs("%s" % save_weight_dir, exist_ok=True)
-train_dataloader = DataLoader(
-    #ImageDataset("./%s" % dataset_name, transforms_=False, unaligned=True),
-    ImageDatasetNii_25D("./%s" % dataset_name, split="train", k=1),
-    batch_size=batch_size,
-    shuffle=True,
-    num_workers=0,
+# --------------------------
+# Device selection (CPU/MPS)
+# --------------------------
+
+if torch.backends.mps.is_available():
+    device = torch.device("mps")
+else:
+    device = torch.device("cpu")
+
+print("Using device:", device)
+
+
+# --------------------------
+# Dataset and DataLoader
+# --------------------------
+
+train_dataset = ImageDatasetNii3D(
+    root=dataset_root,
+    split="train",
+    patch_size=patch_size,
+    seed=123
 )
 
-net_model = UNet(T, ch, ch_mult, attn, num_res_blocks, dropout).to(device)
-optimizer = torch.optim.AdamW(net_model.parameters(), lr=1e-4, betas=(0.9,0.999), eps=1e-8, weight_decay=0)
-trainer = GaussianDiffusionTrainer_cond(net_model, beta_1, beta_T, T).to(device)
+train_loader = DataLoader(
+    train_dataset,
+    batch_size=batch_size,
+    shuffle=True,
+    num_workers=0
+)
+
+
+# --------------------------
+# Model, Optimizer, Diffusion
+# --------------------------
+
+model = UNet3D(
+    T=T,
+    ch=ch,
+    ch_mult=ch_mult,
+    attn=attn,
+    num_res_blocks=num_res_blocks,
+    dropout=dropout
+).to(device)
+
+optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+
+trainer = GaussianDiffusionTrainer_cond(
+    model=model,
+    beta_1=beta_1,
+    beta_T=beta_T,
+    T=T
+).to(device)
+
+
+# --------------------------
+# Training Loop
+# --------------------------
 
 prev_time = time.time()
-for epoch in range(n_epochs):
-    epoch = epoch + 1
-    loss_save = 0
-    for i, batch in enumerate(train_dataloader):
-        i = i + 1
+
+for epoch in range(1, num_epochs + 1):
+    running_loss = 0.0
+
+    for batch_idx, batch in enumerate(train_loader, start=1):
+
+        ct = batch["pCT"].to(device)       # [B, 1, D, H, W]
+        cbct = batch["CBCT"].to(device)    # [B, 1, D, H, W]
+
+        x_0 = torch.cat((ct, cbct), dim=1)  # [B, 2, D, H, W]
+
         optimizer.zero_grad()
-        #ct = Variable(batch["pCT"].type(Tensor))
-        #cbct = Variable(batch["CBCT"].type(Tensor)) #condition
-        #x_0 = torch.cat((ct,cbct),1)
+        loss = trainer(x_0) / (batch_size * 256 * 256 * 96)
 
-        # ------ For 2.5D ------
-        ct = batch["CT"].to(device)
-        cbct = batch["CBCT"].to(device)
-        # concatenate into 6-channel input
-        x_0 = torch.cat((ct, cbct), dim=1)               # [6,H,W]
-        
-        loss = trainer(x_0)
-        loss_save = loss_save + loss/65536
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(net_model.parameters(), grad_clip)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         optimizer.step()
-    loss_save = loss_save / i
 
-    time_duration = datetime.timedelta(seconds=(time.time() - prev_time))
-    epoch_left = n_epochs - epoch
-    time_left = datetime.timedelta(seconds=epoch_left * (time.time() - prev_time))
+        running_loss += loss.item()
+
+    epoch_duration = datetime.timedelta(seconds=(time.time() - prev_time))
     prev_time = time.time()
-    if epoch > 100 and epoch % 10 == 0:
-        torch.save(net_model.state_dict(), os.path.join(save_weight_dir, 'ckpt_' + str(epoch) + "_.pt"))
-    sys.stdout.write(
-        "\r[Epoch %d/%d] [ETA: %s] [EpochDuration: %s] [MSELoss: %s]"
-        % (
-            epoch,
-            n_epochs,
-            time_left,
-            time_duration,
-            loss_save.item(),
-        )
-    )
-    # ---- Save FINAL model after training ----
-    final_path = os.path.join(save_weight_dir, "model_final.pt")
-    torch.save(net_model.state_dict(), final_path)
-    print("\nFinal model saved to:", final_path)
-    
+
+    print(f"Epoch {epoch}/{num_epochs} | Duration: {epoch_duration} | Loss: {running_loss:.6f}")
+
+    if epoch % 10 == 0:
+        ckpt_path = os.path.join(save_dir, f"ckpt_epoch_{epoch}.pt")
+        torch.save(model.state_dict(), ckpt_path)
+        print(f"Saved checkpoint: {ckpt_path}")
