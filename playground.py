@@ -1,38 +1,49 @@
-import os, glob, numpy as np, SimpleITK as sitk, matplotlib.pyplot as plt
+import torch
+from datasets_3d import VolumePatchDataset3D   # your file
+import numpy as np
 
-root = "Sliced_nii/train"
-pid_prefix = "AB_2ABA037"   # change to your patient id prefix
+ROOT = "synthRAD2025_Task2_Train/playground"
 
-def read_slice(path):
-    arr = sitk.GetArrayFromImage(sitk.ReadImage(path)).astype(np.float32)
-    return arr[0] if arr.ndim == 3 else arr
+def main():
 
-A = sorted(glob.glob(os.path.join(root, "a", f"{pid_prefix}_z*.nii.gz")))
-B = sorted(glob.glob(os.path.join(root, "b", f"{pid_prefix}_z*.nii.gz")))
-assert len(A) == len(B) and len(A) > 0, "No slices for that patient"
+    print("Loading dataset…")
+    dataset = VolumePatchDataset3D(
+        root=ROOT,
+        split="train",
+        patch_size=(64, 128, 128),  # (D,H,W)
+        seed=42,
+    )
 
-idx = 0
-fig, ax = plt.subplots(1,3,figsize=(10,4))
-plt.ion()
+    print("Dataset loaded")
+    print("Number of patients:", len(dataset.patients))
 
-def show(i):
-    ct, cbct = read_slice(A[i]), read_slice(B[i])
-    ax[0].imshow(cbct, cmap="gray"); ax[0].set_title("CBCT"); ax[0].axis("off")
-    ax[1].imshow(ct,   cmap="gray"); ax[1].set_title("CT");   ax[1].axis("off")
-    ax[2].imshow(cbct, cmap="gray", alpha=0.5); ax[2].imshow(ct, cmap="hot", alpha=0.35)
-    ax[2].set_title("Overlay"); ax[2].axis("off")
-    fig.suptitle(os.path.basename(A[i]))
-    plt.draw(); plt.pause(0.01)
+    # ------- Test 1: Try reading one item -------
+    print("\nSampling one patch…")
+    sample = dataset[0]
+    ct = sample["pCT"]
+    cbct = sample["CBCT"]
 
-def on_key(event):
-    global idx
-    if event.key == "right":
-        idx = (idx + 1) % len(A)
-        show(idx)
-    elif event.key == "left":
-        idx = (idx - 1) % len(A)
-        show(idx)
+    print("Patch shapes:")
+    print("  pCT :", ct.shape)
+    print("  CBCT:", cbct.shape)
 
-cid = fig.canvas.mpl_connect('key_press_event', on_key)
-show(idx)
-plt.show(block=True)
+    # Should be [1, D, H, W]
+    assert ct.ndim == 4 and cbct.ndim == 4
+    assert ct.shape == cbct.shape
+
+    print("\nValue ranges:")
+    print("  CT  :", float(ct.min()), "to", float(ct.max()))
+    print("  CBCT:", float(cbct.min()), "to", float(cbct.max()))
+
+    # ------- Test 2: Draw several random patches -------
+    print("\nDrawing 5 random patches to test mask-center validity…")
+    for i in range(5):
+        patch = dataset[np.random.randint(len(dataset))]
+        ct = patch["pCT"]
+        center_val = ct[0, ct.shape[1]//2, ct.shape[2]//2, ct.shape[3]//2].item()
+        print(f" Patch {i}: center voxel =", center_val)
+
+    print("\nIf all center voxels are > -1, then mask constraint works.")
+
+if __name__ == "__main__":
+    main()
