@@ -1,7 +1,7 @@
 import os, glob, numpy as np, SimpleITK as sitk, matplotlib.pyplot as plt
 
-root = "brain_nii/train"
-pid_prefix = "2ABA002"   # change to your patient id prefix
+root = "Sliced_nii/train"
+pid_prefix = "AB_2ABA037"   # change to your patient id prefix
 
 def read_slice(path):
     arr = sitk.GetArrayFromImage(sitk.ReadImage(path)).astype(np.float32)
