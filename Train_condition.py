@@ -18,16 +18,16 @@ from datasets_new import ImageDatasetNii3D
 # Configuration
 # --------------------------
 
-dataset_root = "synthRAD2025_Task2_Train/playground"   # root folder containing HN/TH/AB
-patch_size = (64,128,128)
+dataset_root = "playground"   # root folder containing HN/TH/AB
+patch_size = (12,32,32)
 batch_size = 2
-num_epochs = 200
+num_epochs = 20
 learning_rate = 1e-4
 grad_clip = 1.0
 
-T = 1000
+T = 100
 ch = 64
-ch_mult = [1, 2, 4, 4]
+ch_mult = [1, 2, 4]
 attn = [1]
 num_res_blocks = 2
 dropout = 0.1
@@ -38,10 +38,12 @@ save_dir = "./Checkpoints_3D"
 os.makedirs(save_dir, exist_ok=True)
 
 # --------------------------
-# Device selection (CPU/MPS)
+# Device selection (GPU/CPU/MPS)
 # --------------------------
 
-if torch.backends.mps.is_available():
+if torch.cuda.is_available():
+    device = torch.device("cuda")
+elif torch.backends.mps.is_available():
     device = torch.device("mps")
 else:
     device = torch.device("cpu")
@@ -60,6 +62,13 @@ train_dataset = ImageDatasetNii3D(
     seed=123
 )
 
+val_dataset = ImageDatasetNii3D(
+    root=dataset_root,
+    split="val",
+    patch_size=patch_size,
+    seed=999
+)
+
 train_loader = DataLoader(
     train_dataset,
     batch_size=batch_size,
@@ -67,6 +76,12 @@ train_loader = DataLoader(
     num_workers=0
 )
 
+val_loader = DataLoader(
+    val_dataset,
+    batch_size=batch_size,
+    shuffle=False,
+    num_workers=0
+)
 
 # --------------------------
 # Model, Optimizer, Diffusion
@@ -92,36 +107,90 @@ trainer = GaussianDiffusionTrainer_cond(
 
 
 # --------------------------
-# Training Loop
+# Training Loop + Validation
 # --------------------------
 
+best_val_loss = float("inf")
 prev_time = time.time()
 
 for epoch in range(1, num_epochs + 1):
-    running_loss = 0.0
+    # --------------------------
+    # TRAINING
+    # --------------------------
+    model.train()
+    train_loss = 0.0
 
-    for batch_idx, batch in enumerate(train_loader, start=1):
+    for batch in train_loader:
+        ct = batch["CT"].to(device)       # [B,1,D,H,W]
+        cbct = batch["CBCT"].to(device)   # [B,1,D,H,W]
 
-        ct = batch["pCT"].to(device)       # [B, 1, D, H, W]
-        cbct = batch["CBCT"].to(device)    # [B, 1, D, H, W]
-
-        x_0 = torch.cat((ct, cbct), dim=1)  # [B, 2, D, H, W]
+        x_0 = torch.cat((ct, cbct), dim=1)  # [B,2,D,H,W]
 
         optimizer.zero_grad()
-        loss = trainer(x_0) / (batch_size * 256 * 256 * 96)
-
+        loss = trainer(x_0)
         loss.backward()
+
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         optimizer.step()
 
-        running_loss += loss.item()
+        train_loss += loss.item()
 
-    epoch_duration = datetime.timedelta(seconds=(time.time() - prev_time))
+    train_loss /= len(train_loader)
+
+
+    # --------------------------
+    # VALIDATION
+    # --------------------------
+    model.eval()
+    val_loss = 0.0
+
+    with torch.no_grad():
+        for batch in val_loader:
+            ct = batch["CT"].to(device)
+            cbct = batch["CBCT"].to(device)
+
+            x_0 = torch.cat((ct, cbct), dim=1)
+
+            loss = trainer(x_0)
+            val_loss += loss.item()
+
+    val_loss /= len(val_loader)
+
+
+    # --------------------------
+    # Logging
+    # --------------------------
+    epoch_dur = datetime.timedelta(seconds=(time.time() - prev_time))
     prev_time = time.time()
 
-    print(f"Epoch {epoch}/{num_epochs} | Duration: {epoch_duration} | Loss: {running_loss:.6f}")
+    print(
+        f"Epoch {epoch}/{num_epochs} | "
+        f"Train Loss: {train_loss:.6f} | "
+        f"Val Loss: {val_loss:.6f} | "
+        f"Duration: {epoch_dur}"
+    )
 
-    if epoch % 10 == 0:
-        ckpt_path = os.path.join(save_dir, f"ckpt_epoch_{epoch}.pt")
-        torch.save(model.state_dict(), ckpt_path)
-        print(f"Saved checkpoint: {ckpt_path}")
+
+    # --------------------------
+    # Save "best" model (lowest val loss)
+    # --------------------------
+    if val_loss < best_val_loss:
+        best_val_loss = val_loss
+        best_path = os.path.join(save_dir, "best_model.pt")
+        torch.save(model.state_dict(), best_path)
+        print(f"✓ Saved BEST model to {best_path}")
+
+
+    # --------------------------
+    # Optional: Save checkpoint every epoch
+    # --------------------------
+    ckpt_path = os.path.join(save_dir, f"ckpt_epoch_{epoch}.pt")
+    torch.save(model.state_dict(), ckpt_path)
+
+
+# --------------------------
+# Save final model
+# --------------------------
+final_path = os.path.join(save_dir, "model_final.pt")
+torch.save(model.state_dict(), final_path)
+print(f"Final model saved to: {final_path}")

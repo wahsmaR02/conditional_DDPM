@@ -10,6 +10,9 @@ from Diffusion_condition_3D import GaussianDiffusionSampler_cond
 from Model_condition_3D import UNet3D
 from datasets_new import ImageDatasetNii3D
 
+import torch.nn.functional as F
+from skimage.metrics import structural_similarity as ssim
+
 
 # --------------------
 # CONFIG
@@ -120,6 +123,24 @@ def save_middle_slice(cbct, pred_ct, gt_ct, idx):
 
 
 # --------------------
+# Function to compute metrics
+# --------------------
+
+def compute_metrics(pred, gt):
+    # pred, gt: [B,1,D,H,W]
+    mse = F.mse_loss(pred, gt).item()
+    mae = F.l1_loss(pred, gt).item()
+
+    # convert to numpy for SSIM
+    pred_np = pred.cpu().numpy()[0,0]
+    gt_np   = gt.cpu().numpy()[0,0]
+
+    ssim_val = ssim(gt_np, pred_np, data_range=2.0)  # [-1,1] range = 2.0
+
+    return mse, mae, ssim_val
+
+
+# --------------------
 # MAIN TEST LOOP
 # --------------------
 def test():
@@ -139,6 +160,11 @@ def test():
 
             # Extract predicted CT channel
             pred_ct = x_0_pred[:, 0:1, ...]
+
+            # Calculate and print evaluation metrics
+            mse, mae, ssim_val = compute_metrics(pred_ct, ct)
+            print(f"[{i}] MSE={mse:.4f}, MAE={mae:.4f}, SSIM={ssim_val:.4f}")
+
 
             # Visualization
             save_middle_slice(cbct, pred_ct, ct, i+1)
