@@ -57,7 +57,7 @@ train_dataset = VolumePatchDataset3D(
     root=dataset_root,
     split="train",
     patch_size=patch_size,
-    seed=123
+    seed=42
 )
 
 train_loader = DataLoader(
