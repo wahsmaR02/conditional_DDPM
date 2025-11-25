@@ -9,7 +9,7 @@ from torch.autograd import Variable
 import torch.nn.functional as F  # for SSIM
 import matplotlib.pyplot as plt
 
-from Diffusion_condition_3D import (
+from Diffusion_condition import (
     GaussianDiffusionTrainer_cond,
     GaussianDiffusionSampler_cond,
 )
