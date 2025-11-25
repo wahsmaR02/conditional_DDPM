@@ -9,61 +9,65 @@ from torch.autograd import Variable
 import torch.nn.functional as F  # for SSIM
 import matplotlib.pyplot as plt
 
-from Diffusion_condition import (
+from Diffusion_condition_3D import (
     GaussianDiffusionTrainer_cond,
     GaussianDiffusionSampler_cond,
 )
 from Model_condition import UNet
 from datasets_3d import VolumePatchDataset3D
 
-
 # --------------------------
 # Configuration
 # --------------------------
 
-dataset_root = "playground"   # root folder containing HN/TH/AB
-patch_size = (12, 32, 32)
-batch_size = 2
-num_epochs = 5
-learning_rate = 1e-4
-grad_clip = 1.0
+dataset_root = "playground"   # Root folder containing patient subfolders
+patch_size = (12, 32, 32)     # 3D patch shape (D, H, W)
+batch_size = 2                # Number of patches per batch
+num_epochs = 5                # Total training epochs
+learning_rate = 1e-4          # Optimizer learning rate
+grad_clip = 1.0               # Max gradient norm for clipping
 
-T = 100
-ch = 64
-ch_mult = [1, 2, 4]
-attn = [1]
-num_res_blocks = 2
-dropout = 0.1
-beta_1 = 1e-4
-beta_T = 0.02
+# Diffusion hyperparameters
+T = 100                       # Number of diffusion steps
+ch = 64                       # Base UNet channel count
+ch_mult = [1, 2, 4]           # Channel multipliers per UNet level
+attn = [1]                    # Levels with attention (index into ch_mult)
+num_res_blocks = 2            # ResBlocks per level
+dropout = 0.1                 # Dropout rate
+beta_1 = 1e-4                 # Start of beta schedule
+beta_T = 0.02                 # End of beta schedule
 
-save_dir = "./Checkpoints_3D"
+save_dir = "./Checkpoints_3D"  # Where to save all checkpoints and logs
 os.makedirs(save_dir, exist_ok=True)
+
 
 # --------------------------
 # Device selection (GPU/CPU/MPS)
 # --------------------------
 
 if torch.cuda.is_available():
-    device = torch.device("cuda")
+    device = torch.device("cuda")      # Prefer CUDA if available
 elif torch.backends.mps.is_available():
-    device = torch.device("mps")
+    device = torch.device("mps")       # Mac M1/M2 GPU backend
 else:
-    device = torch.device("cpu")
+    device = torch.device("cpu")       # Fallback to CPU
 
 print("Using device:", device)
+
 
 # --------------------------
 # Dataset and DataLoader
 # --------------------------
 
+# Training dataset (random 3D patches)
 train_dataset = VolumePatchDataset3D(
     root=dataset_root,
     split="train",
     patch_size=patch_size,
-    seed=123,
+    seed=123,                # For reproducible patch sampling
 )
 
+# Validation dataset (NO shuffling, different seed)
 val_dataset = VolumePatchDataset3D(
     root=dataset_root,
     split="val",
@@ -71,17 +75,18 @@ val_dataset = VolumePatchDataset3D(
     seed=999,
 )
 
+# PyTorch DataLoader wraps dataset into mini-batches
 train_loader = DataLoader(
     train_dataset,
     batch_size=batch_size,
-    shuffle=True,
+    shuffle=True,          # Shuffle patches during training
     num_workers=0,
 )
 
 val_loader = DataLoader(
     val_dataset,
     batch_size=batch_size,
-    shuffle=False,
+    shuffle=False,         # Validation must be deterministic
     num_workers=0,
 )
 
@@ -89,6 +94,7 @@ val_loader = DataLoader(
 # Model, Optimizer, Diffusion
 # --------------------------
 
+# 3D UNet backbone
 model = UNet(
     T=T,
     ch=ch,
@@ -98,8 +104,10 @@ model = UNet(
     dropout=dropout,
 ).to(device)
 
+# AdamW optimizer
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
+# Diffusion TRAINING module (predicts noise)
 trainer = GaussianDiffusionTrainer_cond(
     model=model,
     beta_1=beta_1,
@@ -107,6 +115,7 @@ trainer = GaussianDiffusionTrainer_cond(
     T=T,
 ).to(device)
 
+# Diffusion SAMPLER module (reverse diffusion)
 sampler = GaussianDiffusionSampler_cond(
     model=model,
     beta_1=beta_1,
@@ -116,14 +125,18 @@ sampler = GaussianDiffusionSampler_cond(
 
 
 # --------------------------
-# SSIM helper for 3D volumes (patch-level, simple version)
+# SSIM helper for 3D volumes
 # --------------------------
 
 def ssim3d(x, y, C1=0.01**2, C2=0.03**2):
     """
+    Computes a simple SSIM approximation for 3D tensors.
     x, y: [B,1,D,H,W]
-    Computes SSIM per batch, returns average over batch.
-    Assumes x, y are roughly normalized to a similar range.
+    Using small avg_pool3d windows to estimate:
+      - local mean
+      - variance
+      - covariance
+    Returns mean SSIM over entire patch.
     """
     mu_x = F.avg_pool3d(x, 3, 1, 0)
     mu_y = F.avg_pool3d(y, 3, 1, 0)
@@ -139,14 +152,14 @@ def ssim3d(x, y, C1=0.01**2, C2=0.03**2):
 
 
 # --------------------------
-# Computing SSIM on validation
+# Validation SSIM computation
 # --------------------------
 
 @torch.no_grad()
 def compute_val_ssim(model, sampler, val_loader, device, max_batches=5):
     """
-    Computes SSIM on reconstructed CT using the existing sampler.
-    Uses only the first few val batches for speed.
+    Computes SSIM using the reverse diffusion sampler.
+    Only uses the first few batches (max_batches) for speed.
     """
     model.eval()
     ssim_vals = []
@@ -155,30 +168,32 @@ def compute_val_ssim(model, sampler, val_loader, device, max_batches=5):
         if i >= max_batches:
             break
 
-        ct = batch["pCT"].to(device)      # [B,1,D,H,W]
-        cbct = batch["CBCT"].to(device)  # [B,1,D,H,W]
+        ct = batch["pCT"].to(device)      # Ground truth CT
+        cbct = batch["CBCT"].to(device)   # Conditioning CBCT
 
-        # --- prepare x_T: random noise for CT + CBCT condition ---
+        # Start reverse diffusion with noise for CT + real CBCT
         noise = torch.randn_like(ct)
-        x_T = torch.cat((noise, cbct), dim=1)  # [B,2,D,H,W]
+        x_T = torch.cat((noise, cbct), dim=1)
 
-        # --- run sampler (reverse diffusion) ---
-        out = sampler(x_T)               # [B,2,D,H,W], CT in channel 0
-        pred_ct = out[:, 0:1, ...]       # only CT channel
+        # Sample reconstructed CT
+        out = sampler(x_T)
+        pred_ct = out[:, 0:1, ...]        # Extract CT channel
 
-        # --- compute SSIM between predicted CT and ground-truth CT ---
+        # Compute SSIM between predicted CT and ground-truth CT
         ssim_val = ssim3d(pred_ct, ct)
         ssim_vals.append(ssim_val.item())
 
-    return sum(ssim_vals) / len(ssim_vals)
+    return sum(ssim_vals) / len(ssim_vals) # Average over batches
+
 
 # --------------------------
-# Save losses for plotting
+# Storage for logging
 # --------------------------
 
 train_losses = []
 val_losses = []
 val_ssims = []
+
 
 # --------------------------
 # Training Loop + Validation
@@ -190,20 +205,20 @@ prev_time = time.time()
 for epoch in range(1, num_epochs + 1):
 
     # --------------------------
-    # TRAINING
+    # TRAINING PHASE
     # --------------------------
     model.train()
     train_loss = 0.0
 
     for batch in train_loader:
-        ct = batch["pCT"].to(device)
-        cbct = batch["CBCT"].to(device)
+        ct = batch["pCT"].to(device)       # Ground truth CT
+        cbct = batch["CBCT"].to(device)   # Condition CBCT
 
-        x_0 = torch.cat((ct, cbct), dim=1)  # [B,2,D,H,W]
+        x_0 = torch.cat((ct, cbct), dim=1)  # Inputs: CT + CBCT
 
         optimizer.zero_grad()
-        loss, numel = trainer(x_0)
-        loss = loss / numel
+        loss, numel = trainer(x_0)          # Predict noise
+        loss = loss / numel                 # Calculate mean loss
         loss.backward()
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
@@ -211,7 +226,8 @@ for epoch in range(1, num_epochs + 1):
 
         train_loss += loss.item()
 
-    train_loss /= len(train_loader)
+    train_loss /= len(train_loader)        # Compute average training loss per batch
+
 
     # --------------------------
     # VALIDATION LOSS
@@ -231,8 +247,9 @@ for epoch in range(1, num_epochs + 1):
 
     val_loss /= len(val_loader)
 
+
     # --------------------------
-    # SSIM (Every 5 epochs)
+    # VALIDATION SSIM (every 5 epochs)
     # --------------------------
     val_ssim = None
     if epoch % 5 == 0:
@@ -240,15 +257,16 @@ for epoch in range(1, num_epochs + 1):
         val_ssim = compute_val_ssim(model, sampler, val_loader, device)
         print(f"Epoch {epoch} — Validation SSIM: {val_ssim:.4f}")
 
-        # Best checkpoint by SSIM
+        # Save best model based on SSIM score
         if val_ssim > best_ssim:
             best_ssim = val_ssim
             best_path = os.path.join(save_dir, "best_model.pt")
             torch.save(model.state_dict(), best_path)
             print(f"✓ Saved BEST model (SSIM={val_ssim:.4f}) → {best_path}")
 
+
     # --------------------------
-    # LOGGING
+    # LOG TRAIN/VAL STATS
     # --------------------------
     epoch_dur = datetime.timedelta(seconds=(time.time() - prev_time))
     prev_time = time.time()
@@ -259,9 +277,8 @@ for epoch in range(1, num_epochs + 1):
         f"Val Loss: {val_loss:.6f} | "
         f"Duration: {epoch_dur}"
     )
-    # --------------------------
-    # Save loss & ssim
-    # --------------------------
+
+    # Save logs for plotting
     train_losses.append(train_loss)
     val_losses.append(val_loss)
     if val_ssim is not None:
@@ -269,10 +286,7 @@ for epoch in range(1, num_epochs + 1):
     else:
         val_ssims.append(None)
 
-
-    # --------------------------
-    # Save checkpoint every epoch (optional)
-    # --------------------------
+    # Save checkpoint each epoch
     ckpt_path = os.path.join(save_dir, f"ckpt_epoch_{epoch}.pt")
     torch.save(model.state_dict(), ckpt_path)
 
@@ -283,6 +297,7 @@ for epoch in range(1, num_epochs + 1):
 final_path = os.path.join(save_dir, "model_final.pt")
 torch.save(model.state_dict(), final_path)
 print(f"Final model saved to: {final_path}")
+
 
 # --------------------------
 # Plot Loss Curves
@@ -299,7 +314,7 @@ plt.savefig(os.path.join(save_dir, "loss_curve.png"))
 plt.close()
 
 # --------------------------
-# Plot SSIM (only every 5 epochs)
+# Plot SSIM Curve
 # --------------------------
 plt.figure(figsize=(10,5))
 epochs_ssim = [e for e in range(1, num_epochs+1)]
@@ -312,4 +327,3 @@ plt.savefig(os.path.join(save_dir, "ssim_curve.png"))
 plt.close()
 
 print("Saved training curves to:", save_dir)
-    
