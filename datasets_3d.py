@@ -120,7 +120,7 @@ class VolumePatchDataset3D(Dataset):
         train_frac: float = 0.8,
         seed: int = 42,
         max_tries: int = 50,
-        patches_per_patient: int = 2,
+        patches_per_patient: int = 1,
         normalize_hu: bool = True,
     ):
         """
@@ -145,6 +145,12 @@ class VolumePatchDataset3D(Dataset):
         self.max_tries = max_tries
         self.patches_per_patient = max(1, patches_per_patient)
         self.normalize_hu = normalize_hu
+
+        # Cache for full volumes so we don't reload from disk each time
+        self._cache_cbct = {}
+        self._cache_ct = {}
+        self._cache_mask = {}
+
 
         # Fixed RNG for reproducibility of patch locations
         self._torch_rng = torch.Generator()
@@ -184,11 +190,20 @@ class VolumePatchDataset3D(Dataset):
 
     def _load_volume(self, path: str, is_hu: bool = True) -> np.ndarray:
         """
-        Load a 3D volume from .mha as numpy array [D, H, W].
-        If is_hu=True, applies HU → [-1,1] normalization.
+        Load 3D volume with caching.
         """
-        img = sitk.ReadImage(path)
-        arr = sitk.GetArrayFromImage(img).astype(np.float32)  # [D,H,W]
+        if path in self._cache_ct:
+            arr = self._cache_ct[path]
+        elif path in self._cache_cbct:
+            arr = self._cache_cbct[path]
+        else:
+            img = sitk.ReadImage(path)
+            arr = sitk.GetArrayFromImage(img).astype(np.float32)
+            # Store in correct cache (use filename type to detect)
+            if "cbct" in path.lower():
+                self._cache_cbct[path] = arr
+            else:
+                self._cache_ct[path] = arr
 
         if is_hu and self.normalize_hu:
             arr = norm_hu(arr)
@@ -197,11 +212,16 @@ class VolumePatchDataset3D(Dataset):
 
     def _load_mask(self, path: str) -> np.ndarray:
         """
-        Load mask volume as uint8 [D, H, W].
+        Load mask with caching.
         """
+        if path in self._cache_mask:
+            return self._cache_mask[path]
+
         img = sitk.ReadImage(path)
         arr = sitk.GetArrayFromImage(img).astype(np.uint8)
+        self._cache_mask[path] = arr
         return arr
+
 
     def _sample_random_corner(self, vol_shape: Tuple[int, int, int]) -> Tuple[int, int, int]:
         """
@@ -307,4 +327,3 @@ class VolumePatchDataset3D(Dataset):
                 "pid": pinfo["pid"],
             }
         }
-
