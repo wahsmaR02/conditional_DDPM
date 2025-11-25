@@ -22,8 +22,8 @@ from datasets_3d import VolumePatchDataset3D
 
 dataset_root = "playground"   # Root folder containing patient subfolders
 patch_size = (12, 32, 32)     # 3D patch shape (D, H, W)
-batch_size = 2                # Number of patches per batch
-num_epochs = 5                # Total training epochs
+batch_size = 5                # Number of patches per batch
+num_epochs = 10               # Total training epochs
 learning_rate = 1e-4          # Optimizer learning rate
 grad_clip = 1.0               # Max gradient norm for clipping
 
@@ -80,7 +80,9 @@ train_loader = DataLoader(
     train_dataset,
     batch_size=batch_size,
     shuffle=True,          # Shuffle patches during training
-    num_workers=0,
+    num_workers=4,
+    pin_memory=True,
+    persistent_workers=True,
 )
 
 val_loader = DataLoader(
@@ -122,6 +124,15 @@ sampler = GaussianDiffusionSampler_cond(
     beta_T=beta_T,
     T=T,
 ).to(device)
+
+# --------------------------
+# Function to save space
+# --------------------------
+def save_clean(model, path):
+    """Save CPU-only, grad-free state dict (small file)."""
+    sd = {k: v.cpu() for k, v in model.state_dict().items()}
+    torch.save(sd, path)
+    model.to(device)
 
 
 # --------------------------
@@ -261,8 +272,9 @@ for epoch in range(1, num_epochs + 1):
         if val_ssim > best_ssim:
             best_ssim = val_ssim
             best_path = os.path.join(save_dir, "best_model.pt")
-            torch.save(model.state_dict(), best_path)
+            save_clean(model, best_path)
             print(f"✓ Saved BEST model (SSIM={val_ssim:.4f}) → {best_path}")
+
 
 
     # --------------------------
@@ -286,18 +298,12 @@ for epoch in range(1, num_epochs + 1):
     else:
         val_ssims.append(None)
 
-    # Save checkpoint each epoch
-    ckpt_path = os.path.join(save_dir, f"ckpt_epoch_{epoch}.pt")
-    torch.save(model.state_dict(), ckpt_path)
-
-
 # --------------------------
 # Save final model
 # --------------------------
 final_path = os.path.join(save_dir, "model_final.pt")
-torch.save(model.state_dict(), final_path)
+save_clean(model, final_path)
 print(f"Final model saved to: {final_path}")
-
 
 # --------------------------
 # Plot Loss Curves
