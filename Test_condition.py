@@ -13,7 +13,6 @@ from datasets_new import ImageDatasetNii3D
 import torch.nn.functional as F
 from skimage.metrics import structural_similarity as ssim
 
-
 # --------------------
 # CONFIG
 # --------------------
