@@ -41,25 +41,29 @@ def collect_patients(root: str,
     Each patient folder is expected to contain:
       cbct.mha, ct.mha, mask.mha
     """
+
     patients = []
+    #Loop over each cohort (i.e HN, AB, TH)
     for cohort in cohorts:
         cohort_dir = os.path.join(root, cohort)
-        if not os.path.isdir(cohort_dir):
+        if not os.path.isdir(cohort_dir):   #Skip if folder doesn't exist
             continue
 
-        for p in sorted(os.listdir(cohort_dir)):
+        for p in sorted(os.listdir(cohort_dir)): #iterate over patients in current cohort
             p_dir = os.path.join(cohort_dir, p)
-            if not os.path.isdir(p_dir):
+            if not os.path.isdir(p_dir):    #skips non-folder entries (stray files etc.)
                 continue
 
+            # Expected files inside each patient directory
             cbct_path = os.path.join(p_dir, "cbct.mha")
             ct_path   = os.path.join(p_dir, "ct.mha")
             mask_path = os.path.join(p_dir, "mask.mha")
 
+            # If any file is missing → treat patient as incomplete and skip
             if not (os.path.exists(cbct_path) and os.path.exists(ct_path) and os.path.exists(mask_path)):
                 # skip incomplete patients
                 continue
-
+            #Adds following metadata to patients list
             patients.append({
                 "cohort": cohort,
                 "pid": p,
@@ -77,16 +81,18 @@ def split_patients_train_val(patients: List[Dict],
                              seed: int = 42) -> Tuple[List[Dict], List[Dict]]:
     """
     Patient-wise random split into train / val.
-    No test set here (per your instructions).
     """
+    #Uses fixed seed, makes shallow copy and shuffle patients in-place
     rng = random.Random(seed)
     patients_shuffled = patients.copy()
     rng.shuffle(patients_shuffled)
 
+    #computes number of patients for training and validation
     N = len(patients_shuffled)
     n_train = int(round(train_frac * N))
-    n_train = min(max(n_train, 1), N - 1)  # ensure at least 1 train and 1 val
+    n_train = min(max(n_train, 1), N - 1)
 
+    #Slices the shuffeled patients in to lists for train/val
     train_pat = patients_shuffled[:n_train]
     val_pat   = patients_shuffled[n_train:]
 
@@ -120,7 +126,7 @@ class VolumePatchDataset3D(Dataset):
         train_frac: float = 0.8,
         seed: int = 42,
         max_tries: int = 50,
-        patches_per_patient: int = 1,
+        patches_per_patient: int = 2,
         normalize_hu: bool = True,
     ):
         """
@@ -150,12 +156,12 @@ class VolumePatchDataset3D(Dataset):
         self._torch_rng = torch.Generator()
         self._torch_rng.manual_seed(seed)
 
-        # 1) Collect all patients
+        #Collect all patients
         all_patients = collect_patients(root, cohorts=cohorts)
         if len(all_patients) == 0:
             raise RuntimeError(f"No valid patients found under {root} (cohorts={cohorts})")
 
-        # 2) Train/val split (patient-wise)
+        #Train/val split (patient-wise)
         train_pat, val_pat = split_patients_train_val(all_patients, train_frac=train_frac, seed=seed)
         if split == "train":
             self.patients = train_pat
@@ -166,7 +172,7 @@ class VolumePatchDataset3D(Dataset):
             raise RuntimeError(f"No patients in {split} split. Check train_frac and data paths.")
 
         self.n_patients = len(self.patients)
-        # We conceptually repeat patients patches_per_patient times
+        # Dataset length = patients × patches per patient per epoch
         self._length = self.n_patients * self.patches_per_patient
 
         print(f"[VolumePatchDataset3D] root={root}")
@@ -198,6 +204,7 @@ class VolumePatchDataset3D(Dataset):
     def _load_mask(self, path: str) -> np.ndarray:
         """
         Load mask volume as uint8 [D, H, W].
+        Mask is used to ensure sampled patches contain anatomy.
         """
         img = sitk.ReadImage(path)
         arr = sitk.GetArrayFromImage(img).astype(np.uint8)
@@ -307,3 +314,4 @@ class VolumePatchDataset3D(Dataset):
                 "pid": pinfo["pid"],
             }
         }
+

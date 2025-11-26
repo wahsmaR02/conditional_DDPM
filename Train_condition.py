@@ -1,4 +1,4 @@
-# Training script for 3D conditional DDPM (updated for patch-based 3D training)
+# Training script for 3D conditional DDPM (updated for patch-based 3D training + cosine LR)
 
 import os
 import time
@@ -83,6 +83,13 @@ model = UNet3D(
 
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
+# ---- Cosine learning rate decay ----
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+    optimizer,
+    T_max=num_epochs,      # full LR decay over all epochs
+    eta_min=1e-6           # final LR
+)
+
 trainer = GaussianDiffusionTrainer_cond(
     model=model,
     beta_1=beta_1,
@@ -116,10 +123,20 @@ for epoch in range(1, num_epochs + 1):
 
         running_loss += loss.item()
 
+    # ---- Step cosine LR scheduler once per epoch ----
+    scheduler.step()
+
     epoch_duration = datetime.timedelta(seconds=(time.time() - prev_time))
     prev_time = time.time()
 
-    print(f"Epoch {epoch}/{num_epochs} | Duration: {epoch_duration} | Loss: {running_loss:.6f}")
+    current_lr = scheduler.get_last_lr()[0]
+
+    print(
+        f"Epoch {epoch}/{num_epochs} | "
+        f"LR: {current_lr:.6f} | "
+        f"Duration: {epoch_duration} | "
+        f"Loss: {running_loss:.6f}"
+    )
 
     if epoch % 10 == 0:
         ckpt_path = os.path.join(save_dir, f"ckpt_epoch_{epoch}.pt")
