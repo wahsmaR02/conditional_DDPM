@@ -5,7 +5,7 @@ import sys
 
 import torch
 from torch.utils.data import DataLoader
-from torch.autograd import Variable
+#from torch.autograd import Variable
 import torch.nn.functional as F  # for SSIM
 import matplotlib.pyplot as plt
 
@@ -108,6 +108,13 @@ model = UNet(
 
 # AdamW optimizer
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+
+# ---- Cosine learning rate decay ----
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+    optimizer,
+    T_max=num_epochs,      # full LR decay over all epochs
+    eta_min=1e-6           # final LR
+)
 
 # Diffusion TRAINING module (predicts noise)
 trainer = GaussianDiffusionTrainer_cond(
@@ -239,6 +246,10 @@ for epoch in range(1, num_epochs + 1):
 
     train_loss /= len(train_loader)        # Compute average training loss per batch
 
+    # ---- Step cosine LR scheduler once per epoch ----
+    scheduler.step()
+
+    current_lr = scheduler.get_last_lr()[0]
 
     # --------------------------
     # VALIDATION LOSS
