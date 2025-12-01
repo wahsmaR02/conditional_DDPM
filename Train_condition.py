@@ -5,7 +5,7 @@ import sys
 
 import torch
 from torch.utils.data import DataLoader
-#from torch.autograd import Variable
+from torch.autograd import Variable
 import torch.nn.functional as F  # for SSIM
 import matplotlib.pyplot as plt
 
@@ -53,6 +53,25 @@ else:
     device = torch.device("cpu")       # Fallback to CPU
 
 print("Using device:", device)
+
+import gc
+
+TARGET_MAX_GB = 12  # you want to use max half of 24GB
+
+def gpu_memory_gb():
+    return torch.cuda.memory_allocated() / 1024**3
+
+def enforce_memory_limit(batch_size):
+    current = gpu_memory_gb()
+    if current > TARGET_MAX_GB:
+        print(f"⚠️ GPU memory high: {current:.2f} GB > {TARGET_MAX_GB} GB.")
+        print("→ Automatically reducing batch size and enabling gradient accumulation.")
+
+        new_batch = max(1, batch_size // 2)
+        torch.cuda.empty_cache()
+        gc.collect()
+        return new_batch, True  # batch_size, accumulate_gradients
+    return batch_size, False
 
 
 # --------------------------
@@ -108,13 +127,6 @@ model = UNet(
 
 # AdamW optimizer
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
-
-# ---- Cosine learning rate decay ----
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-    optimizer,
-    T_max=num_epochs,      # full LR decay over all epochs
-    eta_min=1e-6           # final LR
-)
 
 # Diffusion TRAINING module (predicts noise)
 trainer = GaussianDiffusionTrainer_cond(
@@ -220,6 +232,8 @@ val_ssims = []
 best_ssim = -1.0
 prev_time = time.time()
 
+accum_steps = 1  # will increase automatically if needed
+
 for epoch in range(1, num_epochs + 1):
 
     # --------------------------
@@ -229,27 +243,41 @@ for epoch in range(1, num_epochs + 1):
     train_loss = 0.0
 
     for batch in train_loader:
-        ct = batch["pCT"].to(device)       # Ground truth CT
-        cbct = batch["CBCT"].to(device)   # Condition CBCT
 
-        x_0 = torch.cat((ct, cbct), dim=1)  # Inputs: CT + CBCT
+        ### ------------------------------
+        ### --- ADDED: MEMORY GOVERNOR ---
+        ### ------------------------------
+        used = gpu_memory_gb()
+        if used > TARGET_MAX_GB:
+            print(f"⚠️ GPU at {used:.2f} GB > {TARGET_MAX_GB} GB → Reducing load")
+            accum_steps *= 2
+            torch.cuda.empty_cache()
+            gc.collect()
+            print(f"→ Gradient accumulation increased to {accum_steps}")
+        ### ------------------------------
+
+        ct = batch["pCT"].to(device)
+        cbct = batch["CBCT"].to(device)
+        x_0 = torch.cat((ct, cbct), dim=1)
 
         optimizer.zero_grad()
-        loss, numel = trainer(x_0)          # Predict noise
-        loss = loss / numel                 # Calculate mean loss
+
+        # Scale loss if using accumulation
+        loss, numel = trainer(x_0)
+        loss = loss / numel
+        loss = loss / accum_steps
+
         loss.backward()
 
-        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-        optimizer.step()
+        if (batch_idx := train_loader._index) % accum_steps == 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+            optimizer.step()
+            optimizer.zero_grad()
 
         train_loss += loss.item()
 
-    train_loss /= len(train_loader)        # Compute average training loss per batch
+    train_loss /= len(train_loader)
 
-    # ---- Step cosine LR scheduler once per epoch ----
-    scheduler.step()
-
-    current_lr = scheduler.get_last_lr()[0]
 
     # --------------------------
     # VALIDATION LOSS
@@ -279,13 +307,11 @@ for epoch in range(1, num_epochs + 1):
         val_ssim = compute_val_ssim(model, sampler, val_loader, device)
         print(f"Epoch {epoch} — Validation SSIM: {val_ssim:.4f}")
 
-        # Save best model based on SSIM score
         if val_ssim > best_ssim:
             best_ssim = val_ssim
             best_path = os.path.join(save_dir, "best_model.pt")
             save_clean(model, best_path)
             print(f"✓ Saved BEST model (SSIM={val_ssim:.4f}) → {best_path}")
-
 
 
     # --------------------------
@@ -301,14 +327,10 @@ for epoch in range(1, num_epochs + 1):
         f"Duration: {epoch_dur}"
     )
 
-    # Save logs for plotting
     train_losses.append(train_loss)
     val_losses.append(val_loss)
-    if val_ssim is not None:
-        val_ssims.append(val_ssim)
-    else:
-        val_ssims.append(None)
-
+    val_ssims.append(val_ssim if val_ssim is not None else None)
+    
 # --------------------------
 # Save final model
 # --------------------------
