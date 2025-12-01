@@ -6,6 +6,7 @@ import sys
 import torch
 from torch.utils.data import DataLoader
 from torch.autograd import Variable
+from torch.optim.lr_scheduler import CosineAnnealingLR
 import torch.nn.functional as F  # for SSIM
 import matplotlib.pyplot as plt
 
@@ -125,8 +126,15 @@ model = UNet(
     dropout=dropout,
 ).to(device)
 
-# AdamW optimizer
+#--- AdamW optimizer ---
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+
+# Add cosine decay
+scheduler = CosineAnnealingLR(
+    optimizer,
+    T_max=num_epochs,     # total number of epochs
+    eta_min=1e-6          # minimum LR at the end
+)
 
 # Diffusion TRAINING module (predicts noise)
 trainer = GaussianDiffusionTrainer_cond(
@@ -320,12 +328,17 @@ for epoch in range(1, num_epochs + 1):
     epoch_dur = datetime.timedelta(seconds=(time.time() - prev_time))
     prev_time = time.time()
 
+    # Print epoch stats + LR
+    current_lr = scheduler.get_last_lr()[0]
     print(
         f"Epoch {epoch}/{num_epochs} | "
+        f"LR: {current_lr:.6e} | "
         f"Train Loss: {train_loss:.6f} | "
         f"Val Loss: {val_loss:.6f} | "
         f"Duration: {epoch_dur}"
     )
+    # Step the LR scheduler (cosine)
+    scheduler.step()
 
     train_losses.append(train_loss)
     val_losses.append(val_loss)
