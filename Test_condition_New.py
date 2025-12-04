@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import SimpleITK as sitk
 from tqdm import tqdm
+import random
 
 # --------------------------
 # 1. Imports (Match Train_condition.py)
@@ -37,15 +38,20 @@ attn = [1]
 num_res_blocks = 2
 dropout = 0.1
 
+
+SEED = 42
+torch.manual_seed(SEED)
+
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 # --------------------------
 # 3. Helpers
 # --------------------------
-def norm_hu(arr):
+def norm_hu(arr): 
     """Normalize HU [-1000, 2000] to [-1, 1]"""
-    lo, hi = -1000, 2000
+    lo, hi = -1000, 2000 #needs to be the same value as during training
     arr = np.clip(arr, lo, hi)
     return (2.0 * (arr - lo) / (hi - lo) - 1.0)
 
@@ -86,7 +92,7 @@ def predict_sliding_window(model, sampler, cbct_vol):
             patch_cbct = patch_cbct.unsqueeze(0).unsqueeze(0) # [1, 1, D, H, W]
             
             # 2. Diffusion Sampling
-            noise = torch.randn_like(patch_cbct)
+            noise = torch.randn_like(patch_cbct, generator=torch.Generator(device=device).manual_seed(SEED))
             x_in = torch.cat((noise, patch_cbct), dim=1) # [1, 2, D, H, W]
             
             # Sampler returns [1, 2, D, H, W] (CT, CBCT)
@@ -177,7 +183,8 @@ def main():
     if results:
         avg_mae = np.mean([r['mae'] for r in results])
         avg_ssim = np.mean([r['ms_ssim'] for r in results])
-        print(f"\nFinal Average: MAE={avg_mae:.2f} | MS-SSIM={avg_ssim:.4f}")
+        avg_psnr = np.mean([r['psnr'] for r in results])
+        print(f"\nFinal Average: MAE={avg_mae:.2f} | MS-SSIM={avg_ssim:.4f} | PSNR={avg_psnr:.2f}")
 
 if __name__ == "__main__":
     main()
