@@ -33,9 +33,9 @@ metrics = ImageMetrics(debug=False)
 # --------------------------
 
 dataset_root = "/mnt/asgard0/users/p25_2025/synthRAD2025_Task2_Train/synthRAD2025_Task2_Train/Task2"   # Root folder containing patient subfolders
-patch_size = (16, 64, 64)     # 3D patch shape (D, H, W)
+patch_size = (32, 64, 64)     # 3D patch shape (D, H, W)
 batch_size = 2                # Number of patches per batch
-num_epochs = 30               # Total training epochs
+num_epochs = 100               # Total training epochs
 learning_rate = 1e-4          # Optimizer learning rate
 grad_clip = 1.0               # Max gradient norm for clipping
 
