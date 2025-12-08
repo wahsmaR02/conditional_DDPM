@@ -62,53 +62,67 @@ def denorm_hu(arr):
 
 def predict_sliding_window(model, sampler, cbct_vol):
     """
-    Performs sliding window inference on a full volume.
-    cbct_vol: [D, H, W] numpy array (normalized)
+    Performs sliding window inference on a full volume, ensuring all patches 
+    are exactly the required training size (32, 64, 64) by carefully handling
+    indices at the boundaries.
     """
-    D, H, W = cbct_vol.shape
+    D_orig, H_orig, W_orig = cbct_vol.shape
     pD, pH, pW = patch_size
     sD, sH, sW = stride
     
     # Track sum and count for averaging overlaps
-    output_sum = torch.zeros((D, H, W), device=device)
-    output_count = torch.zeros((D, H, W), device=device)
+    output_sum = torch.zeros((D_orig, H_orig, W_orig), device=device)
+    output_count = torch.zeros((D_orig, H_orig, W_orig), device=device)
     
     cbct_tensor = torch.from_numpy(cbct_vol).float().to(device)
     
-    # Generate grid coordinates
-    dz = list(range(0, D - pD + 1, sD)) + ([D-pD] if (D-pD) % sD != 0 else [])
-    dy = list(range(0, H - pH + 1, sH)) + ([H-pH] if (H-pH) % sH != 0 else [])
-    dx = list(range(0, W - pW + 1, sW)) + ([W-pW] if (W-pW) % sW != 0 else [])
+    # New Robust Indexing (Safe: Only generates indices that allow a full-sized patch)
     
-    # Create unique patch list
+    # Indices up to the last full stride step
+    dz = list(range(0, D_orig - pD + 1, sD))
+    dy = list(range(0, H_orig - pH + 1, sH))
+    dx = list(range(0, W_orig - pW + 1, sW))
+    
+    # Add the final boundary index ONLY if the volume edge hasn't been covered by the stride.
+    # The index must be D_orig - pD, ensuring the patch ends exactly at the boundary.
+    if not dz or dz[-1] < D_orig - pD:
+        dz.append(D_orig - pD)
+    if not dy or dy[-1] < H_orig - pH:
+        dy.append(H_orig - pH)
+    if not dx or dx[-1] < W_orig - pW:
+        dx.append(W_orig - pW)
+        
+    # Clean up (ensure indices are valid, unique, and non-negative)
+    dz = sorted(list(set(z for z in dz if z >= 0)))
+    dy = sorted(list(set(y for y in dy if y >= 0)))
+    dx = sorted(list(set(x for x in dx if x >= 0)))
+
     patches = sorted(list(set((z, y, x) for z in dz for y in dy for x in dx)))
-    print(f"  -> Inferencing {len(patches)} patches...")
+    print(f"  -> Inferencing {len(patches)} full-sized patches...")
     
     model.eval()
     with torch.no_grad():
         for (z, y, x) in tqdm(patches):
-            # 1. Extract Patch
+            # 1. Extract Patch (Guaranteed size pD, pH, pW)
+            # Since the indexing ensures z+pD <= D_orig, this extracts a full patch.
             patch_cbct = cbct_tensor[z:z+pD, y:y+pH, x:x+pW]
             patch_cbct = patch_cbct.unsqueeze(0).unsqueeze(0) # [1, 1, D, H, W]
             
-            # 2. Diffusion Sampling
+            # ... (2. Diffusion Sampling and 3. Accumulate remains the same) ...
             noise = torch.randn_like(patch_cbct, generator=torch.Generator(device=device).manual_seed(SEED))
-            x_in = torch.cat((noise, patch_cbct), dim=1) # [1, 2, D, H, W]
+            x_in = torch.cat((noise, patch_cbct), dim=1) 
             
-            # Sampler returns [1, 2, D, H, W] (CT, CBCT)
             x_out = sampler(x_in)
             
-            # Extract CT channel only
-            pred_patch = x_out[:, 0, :, :, :] # [1, D, H, W]
+            pred_patch = x_out[:, 0, :, :, :] 
             
-            # 3. Accumulate
             output_sum[z:z+pD, y:y+pH, x:x+pW] += pred_patch.squeeze(0)
             output_count[z:z+pD, y:y+pH, x:x+pW] += 1.0
 
     # Average and return
     avg_vol = output_sum / output_count
     return avg_vol.cpu().numpy()
-
+    
 # --------------------------
 # 4. Main Test Loop
 # --------------------------
