@@ -2,7 +2,7 @@
 #
 # 3D volume dataset for SynthRAD Task 2
 # - Loads full cbct.mha / ct.mha / mask.mha
-# - Does an 80/20 patient-wise split into train / val
+# - Does an 70/15/15 split into train/val/test.
 # - On each __getitem__, samples a random 3D patch whose center voxel lies inside the mask
 
 import os
@@ -72,27 +72,32 @@ def collect_patients(root: str,
     return patients
 
 
-def split_patients_train_val(patients: List[Dict],
-                             train_frac: float = 0.8,
-                             seed: int = 42) -> Tuple[List[Dict], List[Dict]]:
+def split_patients_train_val_test(patients: List[Dict],
+                                  train_frac: float = 0.7,
+                                  val_frac: float = 0.15,
+                                  test_frac: float = 0.15,
+                                  seed: int = 42) -> Tuple[List[Dict], List[Dict], List[Dict]]:
     """
-    Patient-wise random split into train / val.
-    No test set here (per your instructions).
+    Patient-wise random split into train / val / test.
     """
+    assert abs(train_frac + val_frac + test_frac - 1.0) < 1e-6, "Fractions must sum to 1.0"
+    
     rng = random.Random(seed)
     patients_shuffled = patients.copy()
     rng.shuffle(patients_shuffled)
 
     N = len(patients_shuffled)
     n_train = int(round(train_frac * N))
-    n_train = min(max(n_train, 1), N - 1)  # ensure at least 1 train and 1 val
-
+    n_val = int(round(val_frac * N))
+    # Ensure at least 1 patient per split
+    n_train = max(1, min(n_train, N - 2))
+    n_val = max(1, min(n_val, N - n_train - 1))
+    
     train_pat = patients_shuffled[:n_train]
-    val_pat   = patients_shuffled[n_train:]
+    val_pat = patients_shuffled[n_train:n_train + n_val]
+    test_pat = patients_shuffled[n_train + n_val:]
 
-    return train_pat, val_pat
-
-
+    return train_pat, val_pat, test_pat
 # ==============================
 # 3D Patch Dataset
 # ==============================
@@ -110,35 +115,33 @@ class VolumePatchDataset3D(Dataset):
         "meta": dict with cohort, pid, etc. (optional, useful for debugging)
       }
     """
-
     def __init__(
         self,
         root: str,
         split: str = "train",
         patch_size: Tuple[int, int, int] = (96, 128, 128),  # (D, H, W)
         cohorts: Tuple[str, ...] = ("HN", "TH", "AB"),
-        train_frac: float = 0.8,
+        train_frac: float = 0.7,  
+        val_frac: float = 0.15,   
+        test_frac: float = 0.15,  
         seed: int = 42,
         max_tries: int = 50,
         patches_per_patient: int = 1,
         normalize_hu: bool = True,
     ):
-        """
         Args:
             root: Root folder with HN/TH/AB subfolders (SynthRAD Task2 root).
             split: "train" or "val".
             patch_size: (pD, pH, pW) size of 3D patches (in voxels).
             cohorts: Which cohort subfolders to use.
-            train_frac: Fraction of patients to use for training (rest for val).
-            seed: Random seed (used for patient-split and patch sampling).
+            train_frac: Fraction of patients to use for training - 70/15/15 split into train/val/test..            seed: Random seed (used for patient-split and patch sampling).
             max_tries: Max attempts to find a patch whose center is in the mask.
             patches_per_patient: How many different random patches each patient yields
                                  per epoch (dataset length = n_patients * patches_per_patient).
             normalize_hu: Apply HU → [-1,1] normalization to CBCT/CT.
         """
         super().__init__()
-        assert split in ("train", "val"), "split must be 'train' or 'val'"
-
+        assert split in ("train", "val", "test"), "split must be 'train', 'val', or 'test'" 
         self.root = root
         self.split = split
         self.patch_size = patch_size
@@ -161,12 +164,20 @@ class VolumePatchDataset3D(Dataset):
         if len(all_patients) == 0:
             raise RuntimeError(f"No valid patients found under {root} (cohorts={cohorts})")
 
-        # 2) Train/val split (patient-wise)
-        train_pat, val_pat = split_patients_train_val(all_patients, train_frac=train_frac, seed=seed)
+        # 2) Train/val/test split (patient-wise)
+        train_pat, val_pat, test_pat = split_patients_train_val_test(
+            all_patients, 
+            train_frac=train_frac, 
+            val_frac=val_frac,  # you'll need to add this parameter
+            test_frac=test_frac,  # and this one
+            seed=seed
+        )
         if split == "train":
             self.patients = train_pat
-        else:
+        elif split == "val":
             self.patients = val_pat
+        else:  # test
+            self.patients = test_pat
 
         if len(self.patients) == 0:
             raise RuntimeError(f"No patients in {split} split. Check train_frac and data paths.")

@@ -49,6 +49,7 @@ dropout = 0.3                 # Dropout rate
 beta_1 = 1e-4                 # Start of beta schedule
 beta_T = 0.02                 # End of beta schedule
 
+
 save_dir = "./Checkpoints_3D"  # Where to save all checkpoints and logs
 os.makedirs(save_dir, exist_ok=True)
 
@@ -96,7 +97,10 @@ train_dataset = VolumePatchDataset3D(
     root=dataset_root,
     split="train",
     patch_size=patch_size,
-    seed=123,                # For reproducible patch sampling
+    train_frac=0.7,   
+    val_frac=0.15,   
+    test_frac=0.15, 
+    seed=123,
 )
 
 # Validation dataset (NO shuffling, different seed)
@@ -104,7 +108,20 @@ val_dataset = VolumePatchDataset3D(
     root=dataset_root,
     split="val",
     patch_size=patch_size,
+    train_frac=0.7,   
+    val_frac=0.15,    
+    test_frac=0.15,   
     seed=999,
+)
+# Test dataset
+test_dataset = VolumePatchDataset3D(
+    root=dataset_root,
+    split="test",
+    patch_size=patch_size,
+    train_frac=0.7,   
+    val_frac=0.15,    
+    test_frac=0.15,   
+    seed=1234,
 )
 
 # PyTorch DataLoader wraps dataset into mini-batches
@@ -124,6 +141,12 @@ val_loader = DataLoader(
     num_workers=0,
 )
 
+test_loader = DataLoader(
+    test_dataset,
+    batch_size=batch_size,
+    shuffle=False,  # Test should not be shuffled
+    num_workers=0,
+)
 # --------------------------
 # Model, Optimizer, Diffusion
 # --------------------------
