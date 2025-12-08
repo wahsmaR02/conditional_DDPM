@@ -20,20 +20,37 @@ from datasets_3d import VolumePatchDataset3D
 # Configuration
 # --------------------------
 
-dataset_root = "playground"   # Root folder containing patient subfolders
-patch_size = (12, 32, 32)     # 3D patch shape (D, H, W)
-batch_size = 5                # Number of patches per batch
-num_epochs = 10               # Total training epochs
+# dataset_root = "playground"   # Root folder containing patient subfolders
+# patch_size = (12, 32, 32)     # 3D patch shape (D, H, W)
+# batch_size = 5                # Number of patches per batch
+# num_epochs = 10               # Total training epochs
+# learning_rate = 1e-4          # Optimizer learning rate
+# grad_clip = 1.0               # Max gradient norm for clipping
+
+# # Diffusion hyperparameters
+# T = 100                       # Number of diffusion steps
+# ch = 64                       # Base UNet channel count
+# ch_mult = [1, 2, 4]           # Channel multipliers per UNet level
+# attn = [1]                    # Levels with attention (index into ch_mult)
+# num_res_blocks = 2            # ResBlocks per level
+# dropout = 0.1                 # Dropout rate
+# beta_1 = 1e-4                 # Start of beta schedule
+# beta_T = 0.02                 # End of beta schedule
+
+#Liams parametrar:
+patch_size = (32, 64, 64)     # 3D patch shape (D, H, W)
+batch_size = 2                # Number of patches per batch
+num_epochs = 100               # Total training epochs
 learning_rate = 1e-4          # Optimizer learning rate
 grad_clip = 1.0               # Max gradient norm for clipping
 
 # Diffusion hyperparameters
-T = 100                       # Number of diffusion steps
-ch = 64                       # Base UNet channel count
-ch_mult = [1, 2, 4]           # Channel multipliers per UNet level
-attn = [1]                    # Levels with attention (index into ch_mult)
+T = 1000                       # Number of diffusion steps
+ch = 64                      # Base UNet channel count
+ch_mult = [1, 2, 3, 4]           # Channel multipliers per UNet level
+attn = [2]                    # Levels with attention (index into ch_mult)
 num_res_blocks = 2            # ResBlocks per level
-dropout = 0.1                 # Dropout rate
+dropout = 0.3                 # Dropout rate
 beta_1 = 1e-4                 # Start of beta schedule
 beta_T = 0.02                 # End of beta schedule
 

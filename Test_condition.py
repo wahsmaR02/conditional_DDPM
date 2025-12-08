@@ -23,7 +23,7 @@ metrics = ImageMetrics(debug=False)
 # 2. Configuration (MUST Match Train_condition.py)
 # --------------------------
 # Paths
-dataset_root = "/content/drive/MyDrive/Project_in_Scientific_Computing/playground/val" # Point to Validation/Test folder
+dataset_root = "/mnt/asgard0/users/p25_2025/synthRAD2025_Task2_Train/synthRAD2025_Task2_Train/Task2" # Point to Validation/Test folder
 save_dir = "./Checkpoints_3D"
 output_dir = "./test_results_3d"
 os.makedirs(output_dir, exist_ok=True)
@@ -33,10 +33,10 @@ patch_size = (32, 64, 64)  # (D, H, W) -> MUST MATCH TRAINING
 stride = (16, 32, 32)      # 50% overlap for smoothing
 T = 1000                   # MUST MATCH TRAINING
 ch = 64
-ch_mult = [1, 2, 4]
-attn = [1]
+ch_mult = [1, 2,3, 4]
+attn = [2]
 num_res_blocks = 2
-dropout = 0.1
+dropout = 0.3
 
 
 SEED = 42
