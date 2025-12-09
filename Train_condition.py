@@ -98,9 +98,9 @@ train_dataset = VolumePatchDataset3D(
     root=dataset_root,
     split="train",
     patch_size=patch_size,
-    train_frac=0.2,   
+    train_frac=0.6,   
     val_frac=0.2,   
-    test_frac=0.6, 
+    test_frac=0.2, 
     seed=42,
 )
 
@@ -109,9 +109,9 @@ val_dataset = VolumePatchDataset3D(
     root=dataset_root,
     split="val",
     patch_size=patch_size,
-    train_frac=0.2,   
+    train_frac=0.6,   
     val_frac=0.2,    
-    test_frac=0.6,   
+    test_frac=0.2,   
     seed=42,
 )
 # Test dataset
@@ -119,9 +119,9 @@ test_dataset = VolumePatchDataset3D(
     root=dataset_root,
     split="test",
     patch_size=patch_size,
-    train_frac=0.2,   
+    train_frac=0.6,   
     val_frac=0.2,    
-    test_frac=0.6,   
+    test_frac=0.2,   
     seed=42,
 )
 
@@ -231,7 +231,7 @@ def compute_val_metrics(model,
                         sampler,
                         val_loader,
                         device,
-                        max_batches=5,
+                        max_batches=1,   # currently only doing 1 image
                         seed: int = 42):
     """
     Computes MAE, PSNR, MS-SSIM using SynthRAD2025 ImageMetrics
@@ -243,8 +243,8 @@ def compute_val_metrics(model,
     model.eval()
 
     mae_vals = []
-    psnr_vals = []
-    msssim_vals = []
+    #psnr_vals = []
+    #msssim_vals = []
 
     # Fix RNG for deterministic sampling across epochs
     cpu_state = torch.get_rng_state()
@@ -281,12 +281,12 @@ def compute_val_metrics(model,
             mask = np.ones_like(gt_vol, dtype=np.float32)
 
             mae = metrics.mae(gt_vol, pred_vol, mask)
-            psnr = metrics.psnr(gt_vol, pred_vol, mask, use_population_range=True)
-            _, ms_ssim_mask = metrics.ms_ssim(gt_vol, pred_vol, mask)
+            #psnr = metrics.psnr(gt_vol, pred_vol, mask, use_population_range=True)
+            #_, ms_ssim_mask = metrics.ms_ssim(gt_vol, pred_vol, mask)
 
             mae_vals.append(mae)
-            psnr_vals.append(psnr)
-            msssim_vals.append(ms_ssim_mask)
+            #psnr_vals.append(psnr)
+            #msssim_vals.append(ms_ssim_mask)
 
     # Restore RNG
     torch.set_rng_state(cpu_state)
@@ -294,10 +294,11 @@ def compute_val_metrics(model,
         torch.cuda.set_rng_state(cuda_state)
 
     mean_mae = float(np.mean(mae_vals)) if mae_vals else float("nan")
-    mean_psnr = float(np.mean(psnr_vals)) if psnr_vals else float("nan")
-    mean_msssim = float(np.mean(msssim_vals)) if msssim_vals else float("nan")
+    #mean_psnr = float(np.mean(psnr_vals)) if psnr_vals else float("nan")
+    #mean_msssim = float(np.mean(msssim_vals)) if msssim_vals else float("nan")
 
-    return mean_mae, mean_psnr, mean_msssim
+    #return mean_mae, mean_psnr, mean_msssim
+    return mean_mae
 
 
 # --------------------------
@@ -308,15 +309,18 @@ train_losses = []
 val_losses = []
 
 val_maes = []
-val_psnrs = []
-val_msssims = []
+#val_psnrs = []
+#val_msssims = []
 
 
 # --------------------------
 # Training Loop + Validation
 # --------------------------
 
-best_msssim = -1.0
+#best_msssim = -1.0
+best_mae = float('inf')
+patience_limit = 15     # Stop if MAE doesn't improve for 15 validation checks (75 epochs total)
+patience_counter = 0    # Tracks how many checks we've gone without improvement
 prev_time = time.time()
 
 accum_steps = 1  # will increase automatically if needed
@@ -371,33 +375,46 @@ for epoch in range(1, num_epochs + 1):
             val_loss += loss.item()
 
     val_loss /= len(val_loader)
-
-    # --------------------------
-    # VALIDATION METRICS (every 30 epochs)
+# --------------------------
+    # VALIDATION METRICS (every 5 epochs)
     # --------------------------
     epoch_mae = None
-    epoch_psnr = None
-    epoch_msssim = None
-
-    if epoch % 30 == 0:
-        print("Computing validation MAE / PSNR / MS-SSIM via SynthRAD metrics...")
-        epoch_mae, epoch_psnr, epoch_msssim = compute_val_metrics(
-            model, sampler, val_loader, device, max_batches=5
+    # epoch_psnr = None  <-- Removed from assignment
+    # epoch_msssim = None <-- Removed from assignment
+    
+    # --- PERIODIC & BEST MODEL CHECK ---
+    if epoch % 5 == 0:
+        print("Computing validation MAE...")
+        
+        # Capture only MAE (since compute_val_metrics was updated to return only MAE)
+        epoch_mae = compute_val_metrics(
+            model, sampler, val_loader, device, max_batches=1 
         )
-        print(
-            f"Epoch {epoch} — "
-            f"Val MAE: {epoch_mae:.4f} | "
-            f"Val PSNR: {epoch_psnr:.4f} | "
-            f"Val MS-SSIM(mask): {epoch_msssim:.4f}"
-        )
+        print(f"Epoch {epoch} — Val MAE: {epoch_mae:.4f}")
 
-        # Track best model by MS-SSIM (higher is better)
-        if epoch_msssim > best_msssim:
-            best_msssim = epoch_msssim
+        # --- 1. BEST MODEL TRACKING (Based on MAE: Lower is Better) ---
+        if epoch_mae < best_mae:
+            print(f"✓ MAE improved from {best_mae:.4f} to {epoch_mae:.4f}. Saving BEST model.")
+            best_mae = epoch_mae
+            patience_counter = 0  # Reset patience counter
             best_path = os.path.join(save_dir, "best_model.pt")
             save_clean(model, best_path)
-            print(f"✓ Saved BEST model (MS-SSIM={epoch_msssim:.4f}) → {best_path}")
+        else:
+            patience_counter += 1 # Increment patience counter
+            print(f"Patience: {patience_counter}/{patience_limit} (MAE did not improve)")
 
+        # --- 2. EARLY STOPPING CHECK ---
+        if patience_counter >= patience_limit:
+            print(f"🛑 Early stopping triggered! MAE has not improved for {patience_limit * 5} epochs.")
+            break # Exit the training loop
+
+        # --- 3. PERIODIC SAVING ---
+        if epoch % 50 == 0:
+            periodic_path = os.path.join(save_dir, f"model_epoch_{epoch}.pt")
+            save_clean(model, periodic_path)
+            print(f"💾 Saved periodic model → {periodic_path}")
+
+    
     # --------------------------
     # LOG TRAIN/VAL STATS
     # --------------------------
@@ -418,8 +435,8 @@ for epoch in range(1, num_epochs + 1):
     train_losses.append(train_loss)
     val_losses.append(val_loss)
     val_maes.append(epoch_mae)
-    val_psnrs.append(epoch_psnr)
-    val_msssims.append(epoch_msssim)
+    #val_psnrs.append(epoch_psnr)
+    #val_msssims.append(epoch_msssim)
 
 # --------------------------
 # Save final model
@@ -463,6 +480,7 @@ plt.grid(True)
 plt.savefig(os.path.join(save_dir, "Val_MAE.png"))
 plt.close()
 
+"""
 # --- PSNR ---
 xs, ys = masked_xy(val_psnrs)
 plt.figure(figsize=(8, 5))
@@ -484,5 +502,7 @@ plt.title("Validation MS-SSIM Over Epochs")
 plt.grid(True)
 plt.savefig(os.path.join(save_dir, "Val_MSSSIM.png"))
 plt.close()
+
+"""
 
 print("Saved separate metric curves to:", save_dir)
