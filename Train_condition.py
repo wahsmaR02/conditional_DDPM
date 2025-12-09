@@ -23,7 +23,7 @@ from datasets_3d import VolumePatchDataset3D
 # --------------------------
 # Adjust this to wherever you cloned SynthRAD2025/metrics 
 # Example: sys.path.append("/home/you/SynthRAD2025/metrics")
-sys.path.append("/content/drive/MyDrive/Project_in_Scientific_Computing/metrics") # !! Change this to the correct path 
+#sys.path.append("/content/drive/MyDrive/Project_in_Scientific_Computing/metrics") # !! Change this to the correct path 
 from SynthRAD_metrics import ImageMetrics  # MAE, PSNR, MS-SSIM
 
 metrics = ImageMetrics(debug=False)
@@ -97,10 +97,10 @@ train_dataset = VolumePatchDataset3D(
     root=dataset_root,
     split="train",
     patch_size=patch_size,
-    train_frac=0.7,   
-    val_frac=0.15,   
-    test_frac=0.15, 
-    seed=123,
+    train_frac=0.2,   
+    val_frac=0.2,   
+    test_frac=0.6, 
+    seed=42,
 )
 
 # Validation dataset (NO shuffling, different seed)
@@ -108,20 +108,20 @@ val_dataset = VolumePatchDataset3D(
     root=dataset_root,
     split="val",
     patch_size=patch_size,
-    train_frac=0.7,   
-    val_frac=0.15,    
-    test_frac=0.15,   
-    seed=999,
+    train_frac=0.2,   
+    val_frac=0.2,    
+    test_frac=0.6,   
+    seed=42,
 )
 # Test dataset
 test_dataset = VolumePatchDataset3D(
     root=dataset_root,
     split="test",
     patch_size=patch_size,
-    train_frac=0.7,   
-    val_frac=0.15,    
-    test_frac=0.15,   
-    seed=1234,
+    train_frac=0.2,   
+    val_frac=0.2,    
+    test_frac=0.6,   
+    seed=42,
 )
 
 # PyTorch DataLoader wraps dataset into mini-batches

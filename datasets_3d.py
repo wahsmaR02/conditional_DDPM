@@ -2,7 +2,7 @@
 #
 # 3D volume dataset for SynthRAD Task 2
 # - Loads full cbct.mha / ct.mha / mask.mha
-# - Does an 70/15/15 split into train/val/test.
+# - Does an 20/20/60 split into train/val/test.
 # - On each __getitem__, samples a random 3D patch whose center voxel lies inside the mask
 
 import os
@@ -73,9 +73,9 @@ def collect_patients(root: str,
 
 
 def split_patients_train_val_test(patients: List[Dict],
-                                  train_frac: float = 0.7,
-                                  val_frac: float = 0.15,
-                                  test_frac: float = 0.15,
+                                  train_frac: float = 0.2,
+                                  val_frac: float = 0.2,
+                                  test_frac: float = 0.6,
                                   seed: int = 42) -> Tuple[List[Dict], List[Dict], List[Dict]]:
     """
     Patient-wise random split into train / val / test.
@@ -121,9 +121,9 @@ class VolumePatchDataset3D(Dataset):
         split: str = "train",
         patch_size: Tuple[int, int, int] = (96, 128, 128),  # (D, H, W)
         cohorts: Tuple[str, ...] = ("HN", "TH", "AB"),
-        train_frac: float = 0.7,  
-        val_frac: float = 0.15,   
-        test_frac: float = 0.15,  
+        train_frac: float = 0.2,  
+        val_frac: float = 0.2,   
+        test_frac: float = 0.6,  
         seed: int = 42,
         max_tries: int = 50,
         patches_per_patient: int = 1,
@@ -135,7 +135,8 @@ class VolumePatchDataset3D(Dataset):
             split: "train" or "val".
             patch_size: (pD, pH, pW) size of 3D patches (in voxels).
             cohorts: Which cohort subfolders to use.
-            train_frac: Fraction of patients to use for training - 70/15/15 split into train/val/test..            seed: Random seed (used for patient-split and patch sampling).
+            train_frac: Fraction of patients to use for training - 20/20/60 split into train/val/test.
+            seed: Random seed (used for patient-split and patch sampling).
             max_tries: Max attempts to find a patch whose center is in the mask.
             patches_per_patient: How many different random patches each patient yields
                                  per epoch (dataset length = n_patients * patches_per_patient).
