@@ -129,6 +129,7 @@ class VolumePatchDataset3D(Dataset):
         patches_per_patient: int = 1,
         normalize_hu: bool = True,
     ):
+      """
         Args:
             root: Root folder with HN/TH/AB subfolders (SynthRAD Task2 root).
             split: "train" or "val".
@@ -139,7 +140,7 @@ class VolumePatchDataset3D(Dataset):
             patches_per_patient: How many different random patches each patient yields
                                  per epoch (dataset length = n_patients * patches_per_patient).
             normalize_hu: Apply HU → [-1,1] normalization to CBCT/CT.
-        
+        """
         super().__init__()
         assert split in ("train", "val", "test"), "split must be 'train', 'val', or 'test'" 
         self.root = root
