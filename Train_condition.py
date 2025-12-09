@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 from torch.autograd import Variable
 from torch.optim.lr_scheduler import CosineAnnealingLR
 import matplotlib.pyplot as plt
+import json
 
 from Diffusion_condition import (
     GaussianDiffusionTrainer_cond,
@@ -23,7 +24,7 @@ from datasets_3d import VolumePatchDataset3D
 # --------------------------
 # Adjust this to wherever you cloned SynthRAD2025/metrics 
 # Example: sys.path.append("/home/you/SynthRAD2025/metrics")
-sys.path.append("/content/drive/MyDrive/Project_in_Scientific_Computing/metrics") # !! Change this to the correct path 
+#sys.path.append("/content/drive/MyDrive/Project_in_Scientific_Computing/metrics") # !! Change this to the correct path 
 from SynthRAD_metrics import ImageMetrics  # MAE, PSNR, MS-SSIM
 
 metrics = ImageMetrics(debug=False)
@@ -35,7 +36,7 @@ metrics = ImageMetrics(debug=False)
 dataset_root = "/mnt/asgard0/users/p25_2025/synthRAD2025_Task2_Train/synthRAD2025_Task2_Train/Task2"   # Root folder containing patient subfolders
 patch_size = (32, 64, 64)     # 3D patch shape (D, H, W)
 batch_size = 2                # Number of patches per batch
-num_epochs = 100               # Total training epochs
+num_epochs = 3               # Total training epochs
 learning_rate = 1e-4          # Optimizer learning rate
 grad_clip = 1.0               # Max gradient norm for clipping
 
@@ -100,7 +101,7 @@ train_dataset = VolumePatchDataset3D(
     train_frac=0.7,   
     val_frac=0.15,   
     test_frac=0.15, 
-    seed=123,
+    seed=42,
 )
 
 # Validation dataset (NO shuffling, different seed)
@@ -111,7 +112,7 @@ val_dataset = VolumePatchDataset3D(
     train_frac=0.7,   
     val_frac=0.15,    
     test_frac=0.15,   
-    seed=999,
+    seed=42,
 )
 # Test dataset
 test_dataset = VolumePatchDataset3D(
@@ -121,7 +122,7 @@ test_dataset = VolumePatchDataset3D(
     train_frac=0.7,   
     val_frac=0.15,    
     test_frac=0.15,   
-    seed=1234,
+    seed=42,
 )
 
 # PyTorch DataLoader wraps dataset into mini-batches
@@ -147,6 +148,15 @@ test_loader = DataLoader(
     shuffle=False,  # Test should not be shuffled
     num_workers=0,
 )
+
+# Save patient IDs in test split
+test_split_path = os.path.join(save_dir, "test_split.json")
+
+with open(test_split_path, "w") as f:
+    json.dump([p["pid"] for p in test_dataset.patients], f, indent=2)
+
+print(f"Saved test split to: {test_split_path}")
+
 # --------------------------
 # Model, Optimizer, Diffusion
 # --------------------------
@@ -321,15 +331,6 @@ for epoch in range(1, num_epochs + 1):
 
     for batch in train_loader:
 
-        # --- Memory governor (only meaningful on GPU) ---
-        used = gpu_memory_gb()
-        if used > TARGET_MAX_GB and torch.cuda.is_available():
-            print(f"⚠️ GPU at {used:.2f} GB > {TARGET_MAX_GB} GB → Reducing load")
-            accum_steps *= 2
-            torch.cuda.empty_cache()
-            gc.collect()
-            print(f"→ Gradient accumulation increased to {accum_steps}")
-
         ct = batch["pCT"].to(device)
         cbct = batch["CBCT"].to(device)
         x_0 = torch.cat((ct, cbct), dim=1)  # [B,2,D,H,W]
@@ -372,13 +373,13 @@ for epoch in range(1, num_epochs + 1):
     val_loss /= len(val_loader)
 
     # --------------------------
-    # VALIDATION METRICS (every 5 epochs)
+    # VALIDATION METRICS (every 30 epochs)
     # --------------------------
     epoch_mae = None
     epoch_psnr = None
     epoch_msssim = None
 
-    if epoch % 5 == 0:
+    if epoch % 30 == 0:
         print("Computing validation MAE / PSNR / MS-SSIM via SynthRAD metrics...")
         epoch_mae, epoch_psnr, epoch_msssim = compute_val_metrics(
             model, sampler, val_loader, device, max_batches=5
@@ -442,27 +443,46 @@ plt.savefig(os.path.join(save_dir, "loss_curve.png"))
 plt.close()
 
 # --------------------------
-# Plot Metric Curves (only where computed)
+# Plot EACH Validation Metric Separately
 # --------------------------
 epochs = np.arange(1, num_epochs + 1)
 
-def masked_plot(values, label):
+def masked_xy(values):
     xs = [e for e, v in zip(epochs, values) if v is not None]
     ys = [v for v in values if v is not None]
-    if xs:
-        plt.plot(xs, ys, marker='o', label=label)
+    return xs, ys
 
-plt.figure(figsize=(10, 5))
-masked_plot(val_maes, "Val MAE")
-masked_plot(val_psnrs, "Val PSNR")
-masked_plot(val_msssims, "Val MS-SSIM(mask)")
-plt.xlabel('Epoch')
-plt.ylabel('Metric value')
-plt.title('Validation Metrics (SynthRAD-style, patch-based)')
-plt.legend()
+# --- MAE ---
+xs, ys = masked_xy(val_maes)
+plt.figure(figsize=(8, 5))
+plt.plot(xs, ys, marker='o')
+plt.xlabel("Epoch")
+plt.ylabel("MAE")
+plt.title("Validation MAE Over Epochs")
 plt.grid(True)
-plt.savefig(os.path.join(save_dir, "metrics_curve.png"))
+plt.savefig(os.path.join(save_dir, "Val_MAE.png"))
 plt.close()
 
-print("Saved training curves to:", save_dir)
+# --- PSNR ---
+xs, ys = masked_xy(val_psnrs)
+plt.figure(figsize=(8, 5))
+plt.plot(xs, ys, marker='o')
+plt.xlabel("Epoch")
+plt.ylabel("PSNR")
+plt.title("Validation PSNR Over Epochs")
+plt.grid(True)
+plt.savefig(os.path.join(save_dir, "Val_PSNR.png"))
+plt.close()
 
+# --- MS-SSIM ---
+xs, ys = masked_xy(val_msssims)
+plt.figure(figsize=(8, 5))
+plt.plot(xs, ys, marker='o')
+plt.xlabel("Epoch")
+plt.ylabel("MS-SSIM (masked)")
+plt.title("Validation MS-SSIM Over Epochs")
+plt.grid(True)
+plt.savefig(os.path.join(save_dir, "Val_MSSSIM.png"))
+plt.close()
+
+print("Saved separate metric curves to:", save_dir)
