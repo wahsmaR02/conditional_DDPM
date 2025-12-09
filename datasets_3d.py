@@ -19,11 +19,16 @@ import SimpleITK as sitk
 # Helper functions
 # ==============================
 
-def norm_hu(arr: np.ndarray, lo: float = -1000, hi: float = 2000) -> np.ndarray:
+def norm_hu(arr: np.ndarray, 
+            lo: float = -1000, 
+            hi: float = 2000,
+            clip: bool = True) -> np.ndarray: # <--- ADDED 'clip' ARGUMENT
     """
-    Clip Hounsfield units to [lo, hi] and scale to [-1,1].
+    Conditionally clips Hounsfield units to [lo, hi] and scales to [-1,1].
     """
-    arr = np.clip(arr, lo, hi)
+    if clip:                                  # <--- CONDITIONAL CLIPPING
+        arr = np.clip(arr, lo, hi)
+        
     return (2.0 * (arr - lo) / (hi - lo) - 1.0).astype(np.float32)
 
 
