@@ -68,10 +68,9 @@ print(f"Using device: {device}")
 # --------------------------
 # 3. Helpers
 # --------------------------
-def norm_hu(arr): 
+def norm_hu_inference(arr: np.ndarray, lo: float = -1000, hi: float = 2000) -> np.ndarray:
     """Normalize HU [-1000, 2000] to [-1, 1]"""
-    lo, hi = -1000, 2000 #needs to be the same value as during training
-    arr = np.clip(arr, lo, hi)
+    #arr = np.clip(arr, lo, hi)   <--- REMOVING CLIPPING
     return (2.0 * (arr - lo) / (hi - lo) - 1.0)
 
 def denorm_hu(arr):
@@ -216,7 +215,7 @@ def main():
             mask_arr = np.ones_like(gt_arr)
 
         # D. Normalize & Predict
-        cbct_norm = norm_hu(cbct_arr)
+        cbct_norm = norm_hu_inference(cbct_arr)
         pred_norm = predict_sliding_window(model, sampler, cbct_norm)
         
         # E. Denormalize
