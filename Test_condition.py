@@ -203,18 +203,36 @@ def main():
 
         # C. Load Data
         cbct_img = sitk.ReadImage(cbct_path)
-        ct_img = sitk.ReadImage(ct_path)
-        
+        #ct_img = sitk.ReadImage(ct_path)
+
         cbct_arr = sitk.GetArrayFromImage(cbct_img) # [D, H, W]
-        gt_arr = sitk.GetArrayFromImage(ct_img)
+        #gt_arr = sitk.GetArrayFromImage(ct_img)
+
+        # ---- this was added ------------------------
+        if has_gt:
+            ct_img = sitk.ReadImage(ct_path)
+            gt_arr = sitk.GetArrayFromImage(ct_img)
+        else:
+            gt_arr = None
+        # ---------------------------------------------
+        
         
         # Load Mask (if exists, else None)
-        if os.path.exists(mask_path):
+        #if os.path.exists(mask_path):
+        #    mask_img = sitk.ReadImage(mask_path)
+        #    mask_arr = sitk.GetArrayFromImage(mask_img)
+        #else:
+        #    print("  Warning: No mask found. Metrics will use full volume.")
+        #    mask_arr = np.ones_like(gt_arr)
+
+        if os.path.exists(mask_path) and has_gt:
             mask_img = sitk.ReadImage(mask_path)
             mask_arr = sitk.GetArrayFromImage(mask_img)
-        else:
+        elif has_gt:
             print("  Warning: No mask found. Metrics will use full volume.")
-            mask_arr = np.ones_like(gt_arr)
+            mask_arr = np.ones_like(gt_arr, dtype = np.uint8)
+        else:
+            mask_arr = None
 
         # D. Normalize & Predict
         cbct_norm = norm_hu_inference(cbct_arr)
@@ -233,8 +251,8 @@ def main():
         else:
             print("  (No ground truth: metrics skipped)")
         
-        print(f"  Result: MAE={scores['mae']:.2f} | PSNR={scores['psnr']:.2f} | MS-SSIM={scores['ms_ssim']:.4f}")
-        results.append(scores)
+        #print(f"  Result: MAE={scores['mae']:.2f} | PSNR={scores['psnr']:.2f} | MS-SSIM={scores['ms_ssim']:.4f}")
+        #results.append(scores)
 
         # G. Save Prediction
         out_img = sitk.GetImageFromArray(pred_hu)

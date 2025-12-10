@@ -266,9 +266,11 @@ class VolumePatchDataset3D(Dataset):
 
         cbct_patch = cbct[z0:z0+pD, y0:y0+pH, x0:x0+pW]
         ct_patch   = ct[z0:z0+pD, y0:y0+pH, x0:x0+pW]
+        mask_patch = mask[z0:z0+pD, y0:y0+pH, x0:x0+pW]
 
         return {
             "CBCT": torch.from_numpy(cbct_patch).unsqueeze(0),
             "pCT":  torch.from_numpy(ct_patch).unsqueeze(0),
+            "mask": torch.from_numpy(mask_patch).float(),
             "meta": {"cohort": pinfo["cohort"], "pid": pinfo["pid"]}
         }
