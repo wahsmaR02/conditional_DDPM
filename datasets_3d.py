@@ -220,21 +220,27 @@ class VolumePatchDataset3D(Dataset):
     # Patch sampling helpers
     # ------------------------------
 
-    def _sample_random_corner(self, vol_shape: Tuple[int, int, int]) -> Tuple[int, int, int]:
+    def _sample_patch_corner(self, vol_shape, idx):
         D, H, W = vol_shape
         pD, pH, pW = self.patch_size
 
-        z0 = int(torch.randint(0, D - pD + 1, (1,), generator=self._torch_rng))
-        y0 = int(torch.randint(0, H - pH + 1, (1,), generator=self._torch_rng))
-        x0 = int(torch.randint(0, W - pW + 1, (1,), generator=self._torch_rng))
+        if self.split == "train":
+            g = self._torch_rng
+        else:
+            g = torch.Generator().manual_seed(self.seed + int(idx))
+
+        z0 = int(torch.randint(0, D - pD + 1, (1,), generator=g))
+        y0 = int(torch.randint(0, H - pH + 1, (1,), generator=g))
+        x0 = int(torch.randint(0, W - pW + 1, (1,), generator=g))
         return z0, y0, x0
 
-    def _sample_valid_patch_corner(self, mask: np.ndarray) -> Tuple[int, int, int]:
+
+    def _sample_valid_patch_corner(self, mask: np.ndarray, idx: int):
         D, H, W = mask.shape
         pD, pH, pW = self.patch_size
 
         for _ in range(self.max_tries):
-            z0, y0, x0 = self._sample_random_corner(mask.shape)
+            z0, y0, x0 = self._sample_patch_corner(mask.shape, idx)
             zc = z0 + pD // 2
             yc = y0 + pH // 2
             xc = x0 + pW // 2
@@ -262,8 +268,8 @@ class VolumePatchDataset3D(Dataset):
         mask = self._load_mask(pinfo["mask_path"])
 
         assert cbct.shape == ct.shape == mask.shape
+        z0, y0, x0 = self._sample_valid_patch_corner(mask, idx)
 
-        z0, y0, x0 = self._sample_valid_patch_corner(mask)
         pD, pH, pW = self.patch_size
 
         cbct_patch = cbct[z0:z0+pD, y0:y0+pH, x0:x0+pW]
