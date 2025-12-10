@@ -239,21 +239,32 @@ class VolumePatchDataset3D(Dataset):
         D, H, W = mask.shape
         pD, pH, pW = self.patch_size
 
+        # IMPORTANT: make a generator ONCE per item, not once per try
+        if self.split == "train":
+            g = self._torch_rng
+        else:
+            g = torch.Generator().manual_seed(self.seed + int(idx))  # fixed per idx
+
         for _ in range(self.max_tries):
-            z0, y0, x0 = self._sample_patch_corner(mask.shape, idx)
+            # sample NEW corners each try (deterministic for val/test because g is fixed)
+            z0 = int(torch.randint(0, D - pD + 1, (1,), generator=g))
+            y0 = int(torch.randint(0, H - pH + 1, (1,), generator=g))
+            x0 = int(torch.randint(0, W - pW + 1, (1,), generator=g))
+
             zc = z0 + pD // 2
             yc = y0 + pH // 2
             xc = x0 + pW // 2
+
             if mask[zc, yc, xc] > 0:
                 return z0, y0, x0
 
-        # fallback
         print("⚠️  Could not find valid patch inside mask, using central patch")
         return (
             max(0, (D - pD) // 2),
             max(0, (H - pH) // 2),
             max(0, (W - pW) // 2)
         )
+
 
     # ------------------------------
     # __getitem__
