@@ -140,6 +140,8 @@ class VolumePatchDataset3D(Dataset):
         self.patches_per_patient = max(1, patches_per_patient)
         self.normalize_hu = normalize_hu
 
+        self.seed = seed  # <--- ADD THIS LINE
+
         # Caches for full volumes
         self._cache_cbct = {}
         self._cache_ct = {}
