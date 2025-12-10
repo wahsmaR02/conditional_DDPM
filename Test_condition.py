@@ -45,6 +45,9 @@ dropout = 0.3
 
 SEED = 42
 torch.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)  
+np.random.seed(SEED)
+random.seed(SEED)
 
 with open("Checkpoints_3D/test_split.json") as f:
     test_ids = json.load(f)
@@ -129,9 +132,8 @@ def predict_sliding_window(model, sampler, cbct_vol):
             # ... (2. Diffusion Sampling and 3. Accumulate remains the same) ...
             #noise = torch.randn_like(patch_cbct, generator=torch.Generator(device=device).manual_seed(SEED))
             # Older PyTorch compatibility: randn_like() cannot accept a generator
-            g = torch.Generator(device=device)
-            g.manual_seed(SEED)
-            noise = torch.randn(patch_cbct.shape, dtype=patch_cbct.dtype, device=device, generator=g)
+         
+            noise = torch.randn(patch_cbct.shape, dtype=patch_cbct.dtype, device=device)
 
             x_in = torch.cat((noise, patch_cbct), dim=1) 
             

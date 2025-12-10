@@ -3,6 +3,8 @@ import os
 import time
 import datetime
 import sys
+import random
+
 
 import numpy as np
 import torch
@@ -28,6 +30,11 @@ from datasets_3d import VolumePatchDataset3D
 from SynthRAD_metrics import ImageMetrics  # MAE, PSNR, MS-SSIM
 
 metrics = ImageMetrics(debug=False)
+
+torch.manual_seed(42)
+torch.cuda.manual_seed_all(42)
+np.random.seed(42)
+random.seed(42)
 
 # --------------------------
 # Configuration
