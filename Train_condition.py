@@ -259,6 +259,7 @@ def compute_val_metrics(model,
 
         ct = batch["pCT"].to(device)      # [B,1,D,H,W], normalized [-1,1]
         cbct = batch["CBCT"].to(device)   # [B,1,D,H,W], normalized [-1,1]
+        mask = batch["mask"].cpu().numpy()
 
         # Start reverse diffusion with noise for CT + real CBCT
         generator = torch.Generator(device=device).manual_seed(seed + i)  # Different seed per batch, but consistent across epochs
@@ -277,11 +278,12 @@ def compute_val_metrics(model,
         for b in range(B):
             gt_vol = gt_np[b]
             pred_vol = pred_np[b]
+            mask_vol = mask[b].astype(np.float32)
 
             # Use a mask of all ones (patch-based; no body mask here)
-            mask = np.ones_like(gt_vol, dtype=np.float32)
+            # mask = np.ones_like(gt_vol, dtype=np.float32)
 
-            mae = metrics.mae(gt_vol, pred_vol, mask)
+            mae = metrics.mae(gt_vol, pred_vol, mask_vol)
             #psnr = metrics.psnr(gt_vol, pred_vol, mask, use_population_range=True)
             #_, ms_ssim_mask = metrics.ms_ssim(gt_vol, pred_vol, mask)
 
