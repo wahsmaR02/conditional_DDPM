@@ -261,7 +261,8 @@ def compute_val_metrics(model,
         cbct = batch["CBCT"].to(device)   # [B,1,D,H,W], normalized [-1,1]
 
         # Start reverse diffusion with noise for CT + real CBCT
-        noise = torch.randn_like(ct)
+        generator = torch.Generator(device=device).manual_seed(seed + i)  # Different seed per batch, but consistent across epochs
+        noise = torch.randn_like(ct, generator=generator)
         x_T = torch.cat((noise, cbct), dim=1)  # [B,2,D,H,W]
 
         # Sample reconstructed CT
