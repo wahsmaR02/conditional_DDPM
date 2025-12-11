@@ -160,7 +160,14 @@ val_loader = DataLoader(
 test_split_path = os.path.join(save_dir, "test_split.json")
 
 with open(test_split_path, "w") as f:
-    json.dump([p["pid"] for p in test_dataset.patients], f, indent=2)
+    json.dump(
+        [
+            {"cohort": p["cohort"], "pid": p["pid"]}
+            for p in test_dataset.patients
+        ],
+        f,
+        indent=2,
+    )
 
 print(f"Saved test split to: {test_split_path}")
 
