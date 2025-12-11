@@ -62,6 +62,9 @@ def sliding_window_inference(model, sampler, cbct_norm, device):
 
     cbct_t = torch.from_numpy(cbct_norm).float().to(device)
 
+    # Added this for deterministic noise
+    noise_generator = torch.Generator(device=device).manual_seed(SEED)
+
     output_sum  = torch.zeros((D, H, W), device=device)
     output_count = torch.zeros((D, H, W), device=device)
 
@@ -85,10 +88,10 @@ def sliding_window_inference(model, sampler, cbct_norm, device):
         for z, y, x in tqdm(patches):
             patch_cbct = cbct_t[z:z+pD, y:y+pH, x:x+pW].unsqueeze(0).unsqueeze(0)
 
-            # Generate deterministic noise
-            g = torch.Generator(device=device)
-            g.manual_seed(SEED)
-            noise = torch.randn(patch_cbct.shape, device=device, generator=g)
+            # Generate deterministic noise   <----- removing this here (Cissi 10/12)
+            #g = torch.Generator(device=device)# <-- DELETE
+            #g.manual_seed(SEED)# <-- DELETE
+            noise = torch.randn(patch_cbct.shape, device=device, generator=noise_generator) # <-- REPLACED with persistent generator)
 
             x_in = torch.cat((noise, patch_cbct), dim=1)
             x_out = sampler(x_in)
