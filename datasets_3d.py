@@ -70,9 +70,9 @@ def collect_patients(root: str,
 
 def split_patients_train_val_test(
     patients: List[Dict],
-    train_frac: float = 0.2,
+    train_frac: float = 0.6,
     val_frac: float = 0.2,
-    test_frac: float = 0.6,
+    test_frac: float = 0.2,
     seed: int = 42
 ) -> Tuple[List[Dict], List[Dict], List[Dict]]:
     """
