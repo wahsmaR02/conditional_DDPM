@@ -56,6 +56,9 @@ def denorm_hu(x):
 def sliding_window_inference(model, sampler, cbct_norm, device, batch_size=4):
     """
     Runs sliding-window inference over the full CBCT volume.
+    Args:
+        batch_size: Number of patches to process simultaneously (default=4)
+                   Increase for better speed, decrease if running out of memory
     """
     D, H, W = cbct_norm.shape
     pD, pH, pW = patch_size
@@ -80,7 +83,7 @@ def sliding_window_inference(model, sampler, cbct_norm, device, batch_size=4):
     patches = [(z, y, x) for z in z_idx for y in y_idx for x in x_idx]
     patches = sorted(set(patches))
 
-    print(f"  -> Running {len(patches)} patches...")
+    print(f"  -> Running {len(patches)} patches in batches of {batch_size}...")
 
     model.eval()
     with torch.no_grad():
