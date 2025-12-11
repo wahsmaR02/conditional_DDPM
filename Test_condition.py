@@ -35,6 +35,7 @@ metrics = ImageMetrics(debug=False)
 SEED = 42
 torch.manual_seed(SEED)
 np.random.seed(SEED)
+torch.cuda.manual_seed_all(SEED)    # <------ added
 
 
 # --------------------------
@@ -111,24 +112,30 @@ def sliding_window_inference(model, sampler, cbct_norm, device):
 def main():
 
     # --------------------------
-    # Load test split IDs
+    # Load test split IDs + cohorts
     # --------------------------
     split_file = os.path.join(save_dir, "test_split.json")
     with open(split_file) as f:
         test_entries = json.load(f)
-        test_keys = {(e["cohort"], e["pid"]) for e in test_entries}
+        split_keys = {(entry["cohort"], entry["pid"]) for entry in test_entries}
+    print(f"Loaded {len(split_keys)} test patients from JSON.")
     
+    test_dataset = VolumePatchDataset3D(...)
     test_dataset.patients = [
         p for p in test_dataset.patients
-        if (p["cohort"], p["pid"]) in test_keys
+        if (p["cohort"], p["pid"]) in split_keys
     ]
+    print(f"Filtered dataset contains {len(test_dataset.patients)} patients.")
 
-    print(f"Loaded {len(test_ids)} test IDs from JSON.")
 
     # --------------------------
     # Create dataset using split='test'
     # --------------------------
-    test_dataset = VolumePatchDataset3D(
+    test_dataset.patients = [
+    p for p in test_dataset.patients
+    if (p["cohort"], p["pid"]) in split_keys
+]
+ = VolumePatchDataset3D(
         root=dataset_root,
         split="test",
         patch_size=patch_size,
