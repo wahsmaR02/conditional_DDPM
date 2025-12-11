@@ -35,17 +35,18 @@ metrics = ImageMetrics(debug=False)
 SEED = 42
 torch.manual_seed(SEED)
 np.random.seed(SEED)
-torch.cuda.manual_seed_all(SEED)    # <------ added
+torch.cuda.manual_seed_all(SEED)  
 
 
 # --------------------------
 # Utility functions
 # --------------------------
 
-def norm_hu_inference(arr: np.ndarray, lo: float = -1000, hi: float = 2000) -> np.ndarray:
-    #lo, hi = -1000, 2000
-    #arr = np.clip(arr, lo, hi)   <--- REMOVING CLIPPING
-    return (2.0 * (arr - lo) / (hi - lo) - 1.0)
+def norm_hu(x):
+    lo, hi = -1000, 2000
+    x = np.clip(x, lo, hi)
+    return 2 * (x - lo) / (hi - lo) - 1
+
 
 def denorm_hu(x):
     lo, hi = -1000, 2000
@@ -61,14 +62,7 @@ def sliding_window_inference(model, sampler, cbct_norm, device):
     sD, sH, sW = stride
 
     cbct_t = torch.from_numpy(cbct_norm).float().to(device)
-
-    # Added this for deterministic noise
-    # noise_generator = torch.Generator(device=device).manual_seed(SEED) <---- REMOVING
-
-    # Generate deterministic noise   <----- removing this here (Cissi 10/12)
-    #g = torch.Generator(device=device)# <-- DELETE
-    #g.manual_seed(SEED)# <-- DELETE
-    noise = torch.randn(patch_cbct.shape, device=device, generator=noise_generator)
+    noise_generator = torch.Generator(device=device).manual_seed(SEED)
 
     output_sum  = torch.zeros((D, H, W), device=device)
     output_count = torch.zeros((D, H, W), device=device)
@@ -90,22 +84,41 @@ def sliding_window_inference(model, sampler, cbct_norm, device):
 
     model.eval()
     with torch.no_grad():
-        for z, y, x in tqdm(patches):
-            patch_cbct = cbct_t[z:z+pD, y:y+pH, x:x+pW].unsqueeze(0).unsqueeze(0)
-
-            # Generate deterministic noise   <----- removing this here (Cissi 10/12)
-            #g = torch.Generator(device=device)# <-- DELETE
-            #g.manual_seed(SEED)# <-- DELETE
-            noise = torch.randn(patch_cbct.shape, device=device, generator=noise_generator) # <-- REPLACED with persistent generator)
-
-            x_in = torch.cat((noise, patch_cbct), dim=1)
-            x_out = sampler(x_in)
-
-            pred_patch = x_out[:, 0, :, :, :].squeeze(0)
-
-            output_sum[z:z+pD, y:y+pH, x:x+pW] += pred_patch
-            output_count[z:z+pD, y:y+pH, x:x+pW] += 1
-
+       # Process patches in batches
+        for batch_start in tqdm(range(0, len(patches), batch_size)):
+            batch_end = min(batch_start + batch_size, len(patches))
+            batch_coords = patches[batch_start:batch_end]
+            current_batch_size = len(batch_coords)
+            
+            # Collect all patches in this batch
+            batch_cbct_patches = []
+            batch_noises = []
+            
+            for z, y, x in batch_coords:
+                # Extract patch
+                patch = cbct_t[z:z+pD, y:y+pH, x:x+pW]
+                batch_cbct_patches.append(patch)
+                
+                # Generate noise for this patch
+                noise = torch.randn((pD, pH, pW), device=device, generator=noise_generator)
+                batch_noises.append(noise)
+            
+            # Stack into batch dimension: (batch_size, D, H, W)
+            batch_cbct = torch.stack(batch_cbct_patches, dim=0).unsqueeze(1)  # (B, 1, D, H, W)
+            batch_noise = torch.stack(batch_noises, dim=0).unsqueeze(1)       # (B, 1, D, H, W)
+            
+            # Concatenate condition and noise
+            x_in = torch.cat((batch_noise, batch_cbct), dim=1)  # (B, 2, D, H, W)
+            
+            # Process entire batch at once! ← THIS IS THE KEY
+            x_out = sampler(x_in)  # (B, 1, D, H, W)
+            
+            # Distribute results back to output volume
+            for i, (z, y, x) in enumerate(batch_coords):
+                pred_patch = x_out[i, 0, :, :, :]  # Extract i-th result
+                output_sum[z:z+pD, y:y+pH, x:x+pW] += pred_patch
+                output_count[z:z+pD, y:y+pH, x:x+pW] += 1
+    
     result = output_sum / output_count
     return result.cpu().numpy()
 
@@ -116,14 +129,17 @@ def sliding_window_inference(model, sampler, cbct_norm, device):
 def main():
 
     # --------------------------
-    # Load test split IDs + cohorts
+    # Load test split IDs
     # --------------------------
     split_file = os.path.join(save_dir, "test_split.json")
     with open(split_file) as f:
-        test_entries = json.load(f)
-        split_keys = {(entry["cohort"], entry["pid"]) for entry in test_entries}
-    print(f"Loaded {len(split_keys)} test patients from JSON.")
+        test_ids = set(json.load(f))
 
+    print(f"Loaded {len(test_ids)} test IDs from JSON.")
+
+    # --------------------------
+    # Create dataset using split='test'
+    # --------------------------
     test_dataset = VolumePatchDataset3D(
         root=dataset_root,
         split="test",
@@ -134,10 +150,11 @@ def main():
         seed=42,
     )
 
+    # Filter to ensure exact match with saved split
     test_dataset.patients = [
-        p for p in test_dataset.patients
-        if (p["cohort"], p["pid"]) in split_keys
+        p for p in test_dataset.patients if p["pid"] in test_ids
     ]
+
     print(f"Filtered dataset contains {len(test_dataset.patients)} patients.")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -191,7 +208,7 @@ def main():
             mask = np.ones_like(gt, dtype=np.float32)
 
         # Normalize
-        cbct_norm = norm_hu_inference(cbct)
+        cbct_norm = norm_hu(cbct)
 
         # Predict full synthetic CT
         pred_norm = sliding_window_inference(model, sampler, cbct_norm, device)
