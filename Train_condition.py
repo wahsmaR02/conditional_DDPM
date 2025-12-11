@@ -9,7 +9,7 @@ import random
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from torch.autograd import Variable
+#from torch.autograd import Variable
 from torch.optim.lr_scheduler import CosineAnnealingLR
 import matplotlib.pyplot as plt
 import json
@@ -43,7 +43,7 @@ random.seed(42)
 dataset_root = "/mnt/asgard0/users/p25_2025/synthRAD2025_Task2_Train/synthRAD2025_Task2_Train/Task2"   # Root folder containing patient subfolders
 patch_size = (32, 64, 64)     # 3D patch shape (D, H, W)
 batch_size = 2                # Number of patches per batch
-num_epochs = 3               # Total training epochs
+num_epochs = 200               # Total training epochs
 learning_rate = 1e-4          # Optimizer learning rate
 grad_clip = 1.0               # Max gradient norm for clipping
 
@@ -76,24 +76,24 @@ else:
 
 print("Using device:", device)
 
-import gc
+#import gc
 
-TARGET_MAX_GB = 12  # you want to use max half of 24GB
+#TARGET_MAX_GB = 12  # you want to use max half of 24GB
 
-def gpu_memory_gb():
-    return torch.cuda.memory_allocated() / 1024**3
+#def gpu_memory_gb():
+#    return torch.cuda.memory_allocated() / 1024**3
 
-def enforce_memory_limit(batch_size):
-    current = gpu_memory_gb()
-    if current > TARGET_MAX_GB:
-        print(f"GPU memory high: {current:.2f} GB > {TARGET_MAX_GB} GB.")
-        print("→ Automatically reducing batch size and enabling gradient accumulation.")
+#def enforce_memory_limit(batch_size):
+#    current = gpu_memory_gb()
+#    if current > TARGET_MAX_GB:
+#        print(f"GPU memory high: {current:.2f} GB > {TARGET_MAX_GB} GB.")
+#        print("→ Automatically reducing batch size and enabling gradient accumulation.")
 
-        new_batch = max(1, batch_size // 2)
-        torch.cuda.empty_cache()
-        gc.collect()
-        return new_batch, True  # batch_size, accumulate_gradients
-    return batch_size, False
+ #       new_batch = max(1, batch_size // 2)
+ #       torch.cuda.empty_cache()
+ #       gc.collect()
+ #       return new_batch, True  # batch_size, accumulate_gradients
+ #   return batch_size, False
 
 
 # --------------------------
@@ -149,12 +149,12 @@ val_loader = DataLoader(
     num_workers=0,
 )
 
-test_loader = DataLoader(
-    test_dataset,
-    batch_size=batch_size,
-    shuffle=False,  # Test should not be shuffled
-    num_workers=0,
-)
+#test_loader = DataLoader(
+#    test_dataset,
+#    batch_size=batch_size,
+#    shuffle=False,  # Test should not be shuffled
+#    num_workers=0,
+#)
 
 # Save patient IDs in test split
 test_split_path = os.path.join(save_dir, "test_split.json")
@@ -333,7 +333,7 @@ patience_limit = 15     # Stop if MAE doesn't improve for 15 validation checks (
 patience_counter = 0    # Tracks how many checks we've gone without improvement
 prev_time = time.time()
 
-accum_steps = 1  # will increase automatically if needed
+#accum_steps = 1  # will increase automatically if needed
 
 for epoch in range(1, num_epochs + 1):
 
@@ -347,22 +347,32 @@ for epoch in range(1, num_epochs + 1):
 
         ct = batch["pCT"].to(device)
         cbct = batch["CBCT"].to(device)
+
         x_0 = torch.cat((ct, cbct), dim=1)  # [B,2,D,H,W]
 
+        # clear old gradients
         optimizer.zero_grad()
 
-        # Scale loss if using accumulation
+        # forward diffusion training step
         loss, numel = trainer(x_0)
-        loss = loss / numel
-        loss = loss / accum_steps
 
+        # convert to mean loss (per voxel)
+        loss = loss / numel
+        
+        #loss = loss / accum_steps
+
+        # backprop
         loss.backward()
 
         # NOTE: train_loader._index is a bit hacky; if it breaks, replace with a manual counter.
-        if (batch_idx := getattr(train_loader, "_index", 0)) % accum_steps == 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-            optimizer.step()
-            optimizer.zero_grad()
+        #if (batch_idx := getattr(train_loader, "_index", 0)) % accum_steps == 0:
+        #    torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+        #    optimizer.step()
+        #    optimizer.zero_grad()
+
+        # clip gradients and update weights (ONE STEP PER BACTH)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+        optimizer.step()
 
         train_loss += loss.item()
 
