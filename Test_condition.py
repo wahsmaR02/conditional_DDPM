@@ -57,6 +57,9 @@ eval_dataset = VolumePatchDataset3D(
     root=dataset_root,
     split="test",
     patch_size=patch_size,
+    train_frac=0.6,   
+    val_frac=0.2,    
+    test_frac=0.2,  
     seed=42,
 )
 
