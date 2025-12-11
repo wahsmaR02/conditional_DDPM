@@ -53,7 +53,7 @@ def denorm_hu(x):
     return ((x + 1) / 2) * (hi - lo) + lo
 
 
-def sliding_window_inference(model, sampler, cbct_norm, device):
+def sliding_window_inference(model, sampler, cbct_norm, device, batch_size=4):
     """
     Runs sliding-window inference over the full CBCT volume.
     """
@@ -110,7 +110,7 @@ def sliding_window_inference(model, sampler, cbct_norm, device):
             # Concatenate condition and noise
             x_in = torch.cat((batch_noise, batch_cbct), dim=1)  # (B, 2, D, H, W)
             
-            # Process entire batch at once! ← THIS IS THE KEY
+            # Process entire batch at once! 
             x_out = sampler(x_in)  # (B, 1, D, H, W)
             
             # Distribute results back to output volume
