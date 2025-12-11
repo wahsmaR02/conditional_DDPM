@@ -173,6 +173,8 @@ def main():
         if not os.path.isdir(cohort_dir):
             continue
         for pid in os.listdir(cohort_dir):
+            if pid not in test_ids:
+                continue
             p_dir = os.path.join(cohort_dir, pid)
             if os.path.isdir(p_dir):
                 patients.append((cohort, pid, p_dir))
