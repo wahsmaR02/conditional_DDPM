@@ -42,11 +42,10 @@ torch.cuda.manual_seed_all(SEED)    # <------ added
 # Utility functions
 # --------------------------
 
-def norm_hu(x):
-    lo, hi = -1000, 2000
-    x = np.clip(x, lo, hi)
-    return 2 * (x - lo) / (hi - lo) - 1
-
+def norm_hu_inference(arr: np.ndarray, lo: float = -1000, hi: float = 2000) -> np.ndarray:
+    #lo, hi = -1000, 2000
+    #arr = np.clip(arr, lo, hi)   <--- REMOVING CLIPPING
+    return (2.0 * (arr - lo) / (hi - lo) - 1.0)
 
 def denorm_hu(x):
     lo, hi = -1000, 2000
@@ -119,23 +118,8 @@ def main():
         test_entries = json.load(f)
         split_keys = {(entry["cohort"], entry["pid"]) for entry in test_entries}
     print(f"Loaded {len(split_keys)} test patients from JSON.")
-    
-    test_dataset = VolumePatchDataset3D(...)
-    test_dataset.patients = [
-        p for p in test_dataset.patients
-        if (p["cohort"], p["pid"]) in split_keys
-    ]
-    print(f"Filtered dataset contains {len(test_dataset.patients)} patients.")
 
-
-    # --------------------------
-    # Create dataset using split='test'
-    # --------------------------
-    test_dataset.patients = [
-    p for p in test_dataset.patients
-    if (p["cohort"], p["pid"]) in split_keys
-]
- = VolumePatchDataset3D(
+    test_dataset = VolumePatchDataset3D(
         root=dataset_root,
         split="test",
         patch_size=patch_size,
@@ -145,11 +129,10 @@ def main():
         seed=42,
     )
 
-    # Filter to ensure exact match with saved split
     test_dataset.patients = [
-        p for p in test_dataset.patients if p["pid"] in test_ids
+        p for p in test_dataset.patients
+        if (p["cohort"], p["pid"]) in split_keys
     ]
-
     print(f"Filtered dataset contains {len(test_dataset.patients)} patients.")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -203,7 +186,7 @@ def main():
             mask = np.ones_like(gt, dtype=np.float32)
 
         # Normalize
-        cbct_norm = norm_hu(cbct)
+        cbct_norm = norm_hu_inference(cbct)
 
         # Predict full synthetic CT
         pred_norm = sliding_window_inference(model, sampler, cbct_norm, device)
