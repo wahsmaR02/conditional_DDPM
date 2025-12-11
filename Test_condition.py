@@ -115,7 +115,13 @@ def main():
     # --------------------------
     split_file = os.path.join(save_dir, "test_split.json")
     with open(split_file) as f:
-        test_ids = set(json.load(f))
+        test_entries = json.load(f)
+        test_keys = {(e["cohort"], e["pid"]) for e in test_entries}
+    
+    test_dataset.patients = [
+        p for p in test_dataset.patients
+        if (p["cohort"], p["pid"]) in test_keys
+    ]
 
     print(f"Loaded {len(test_ids)} test IDs from JSON.")
 
