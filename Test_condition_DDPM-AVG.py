@@ -125,7 +125,7 @@ def sliding_window_inference(model, sampler, cbct_norm, device, batch_size=4, nu
                 x_in = torch.cat((batch_noise, batch_cbct), dim=1)  # (B, 2, D, H, W)
             
                 # Process entire batch at once! 
-                x_out = sampler(x_in)  # (B, 1, D, H, W)
+                x_out = sampler(x_in)[:, 0:1]  # (B, 1, D, H, W)
 
                 # Added for stochastic DDPM-AVG
                 patch_sum_sct_batch += x_out # ADD: Accumulate stochastic sample
@@ -135,7 +135,7 @@ def sliding_window_inference(model, sampler, cbct_norm, device, batch_size=4, nu
             # Distribute results back to output volume
             for i, (z, y, x) in enumerate(batch_coords):
                 #pred_patch = x_out[i, 0, :, :, :]  # Extract i-th result <---- CISSI REMOVED FOR DDPM-AVG
-                pred_patch = avg_pred_patch_batch[i, 0, :, :, :]  # ADDED for DDPM-AVG
+                pred_patch = avg_pred_patch_batch[i, 0, :, :, :] # ADDED for DDPM-AVG
                 output_sum[z:z+pD, y:y+pH, x:x+pW] += pred_patch
                 output_count[z:z+pD, y:y+pH, x:x+pW] += 1
     
