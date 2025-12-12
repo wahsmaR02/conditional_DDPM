@@ -6,6 +6,7 @@ import torch
 import SimpleITK as sitk
 from tqdm import tqdm
 from torch.utils.data import DataLoader
+from scipy.signal import windows
 
 from Model_condition import UNet
 from Diffusion_condition import GaussianDiffusionSampler_cond
@@ -22,7 +23,8 @@ output_dir = "./test_results_3d"
 os.makedirs(output_dir, exist_ok=True)
 
 patch_size = (32, 64, 64)
-stride = (16, 32, 32)  # overlap sliding window
+#stride = (16, 32, 32)  # overlap sliding window
+stride = (28, 57, 57) # only a 10% overlap to speed up process
 T = 1000
 ch = 64
 ch_mult = [1, 2, 3, 4]
@@ -44,6 +46,27 @@ torch.cuda.manual_seed_all(SEED)
 # Utility functions
 # --------------------------
 
+# ADD GAUSSIAN HELPER (for weighted average)
+def gaussian_weight_3d(patch_size, sigma_frac=0.125):
+    """Creates a 3D Gaussian weight map for smooth patch blending."""
+    pD, pH, pW = patch_size
+    
+    def gaussian_1d(length):
+        if length == 1: return np.array([1.0])
+        # Use sigma based on a fraction of the length for smooth decay
+        sigma = length * sigma_frac
+        g = windows.gaussian(length, std=sigma)
+        return g
+
+    gD = gaussian_1d(pD)
+    gH = gaussian_1d(pH)
+    gW = gaussian_1d(pW)
+    
+    # Outer product to create 3D weight map
+    weights = gD[:, None, None] * gH[None, :, None] * gW[None, None, :]
+    # Normalize to ensure max value is 1.0
+    return (weights / weights.max()).astype(np.float32)
+
 def norm_hu(x):
     lo, hi = -1000, 2000
     x = np.clip(x, lo, hi)
@@ -55,9 +78,10 @@ def denorm_hu(x):
     return ((x + 1) / 2) * (hi - lo) + lo
 
 
-def sliding_window_inference(model, sampler, cbct_norm, device, batch_size=4, num_samples_to_avg=N_SAMPLES_TO_AVG): # <-- CISSI MODIFIED THIS LINE FOR stochastic DDPM-AVG 
+def sliding_window_inference(model, sampler, cbct_norm, device, mask: np.ndarray, batch_size=4, num_samples_to_avg=N_SAMPLES_TO_AVG): # <-- CISSI MODIFIED THIS LINE FOR stochastic DDPM-AVG 
     """
-    Runs sliding-window inference over the full CBCT volume.
+    Runs sliding-window inference over the full CBCT volume,
+    but only processes patches that intersect the mask.
     Args:
         batch_size: Number of patches to process simultaneously (default=4)
                    Increase for better speed, decrease if running out of memory
@@ -69,8 +93,16 @@ def sliding_window_inference(model, sampler, cbct_norm, device, batch_size=4, nu
     cbct_t = torch.from_numpy(cbct_norm).float().to(device)
     # noise_generator = torch.Generator(device=device).manual_seed(SEED) # <-- CISSI REMOVED THIS LINE for DDPM-AVG
 
+    # 1. NEW: Initialize Gaussian weights once
+    patch_weights_np = gaussian_weight_3d(patch_size)
+    patch_weights_t = torch.from_numpy(patch_weights_np).float().to(device)
+
+    # 2. NEW: output_weights replaces output_count
     output_sum  = torch.zeros((D, H, W), device=device)
-    output_count = torch.zeros((D, H, W), device=device)
+    output_weights = torch.zeros((D, H, W), device=device)
+    
+    #output_sum  = torch.zeros((D, H, W), device=device)
+    #output_count = torch.zeros((D, H, W), device=device)
 
     # Compute valid patch starting indices
     z_idx = list(range(0, D - pD + 1, sD))
@@ -82,10 +114,35 @@ def sliding_window_inference(model, sampler, cbct_norm, device, batch_size=4, nu
     if y_idx[-1] != H - pH: y_idx.append(H - pH)
     if x_idx[-1] != W - pW: x_idx.append(W - pW)
 
-    patches = [(z, y, x) for z in z_idx for y in y_idx for x in x_idx]
-    patches = sorted(set(patches))
+    # Removes this to ignore background patches
+    #patches = [(z, y, x) for z in z_idx for y in y_idx for x in x_idx]
+    #patches = sorted(set(patches))
 
-    print(f"  -> Running {len(patches)} patches in batches of {batch_size}...")
+    # Generate all potential patch start coordinates
+    all_patches = [(z, y, x) for z in z_idx for y in y_idx for x in x_idx]
+    all_patches = sorted(set(all_patches)) # Removes duplicates, crucial if stride causes overlap at boundaries
+
+    # -------------------------------------------------------------
+    # NEW STEP: FILTER PATCHES TO ONLY INCLUDE THOSE INTERSECTING MASK
+    # -------------------------------------------------------------
+    
+    # A patch is considered relevant if any voxel within its bounding box 
+    # is part of the patient mask (value > 0).
+    relevant_patches = []
+    
+    for z, y, x in all_patches:
+        # Extract the patch region from the mask
+        mask_patch = mask[z:z+pD, y:y+pH, x:x+pW]
+        
+        # Check if any part of the mask patch is non-zero
+        if np.any(mask_patch > 0):
+            relevant_patches.append((z, y, x))
+            
+    patches = relevant_patches # Use the filtered list for the loop
+    
+    print(f"  -> Processing {len(patches)} relevant patches (skipping {len(all_patches) - len(patches)} background patches)...")
+    
+    # print(f"  -> Running {len(patches)} patches in batches of {batch_size}...")
 
     model.eval()
     with torch.no_grad():
@@ -136,10 +193,20 @@ def sliding_window_inference(model, sampler, cbct_norm, device, batch_size=4, nu
             for i, (z, y, x) in enumerate(batch_coords):
                 #pred_patch = x_out[i, 0, :, :, :]  # Extract i-th result <---- CISSI REMOVED FOR DDPM-AVG
                 pred_patch = avg_pred_patch_batch[i, 0, :, :, :] # ADDED for DDPM-AVG
-                output_sum[z:z+pD, y:y+pH, x:x+pW] += pred_patch
-                output_count[z:z+pD, y:y+pH, x:x+pW] += 1
+                # 3. Apply weights and accumulate
+                weighted_pred_patch = pred_patch * patch_weights_t
+                
+                output_sum[z:z+pD, y:y+pH, x:x+pW] += weighted_pred_patch
+                # 4. Accumulate the weights (for final division)
+                output_weights[z:z+pD, y:y+pH, x:x+pW] += patch_weights_t
+                
+                #output_sum[z:z+pD, y:y+pH, x:x+pW] += pred_patch
+                #output_count[z:z+pD, y:y+pH, x:x+pW] += 1
     
-    result = output_sum / output_count
+    #result = output_sum / output_count
+    # Final result: Weighted sum divided by accumulated weights
+    result = torch.where(output_weights > 0, output_sum / output_weights, output_sum)
+    
     return result.cpu().numpy()
 
 
@@ -238,8 +305,21 @@ def main():
         cbct_norm = norm_hu(cbct)
 
         # Predict full synthetic CT
-        pred_norm = sliding_window_inference(model, sampler, cbct_norm, device)
+        pred_norm = sliding_window_inference(model, sampler, cbct_norm, device, mask)
         pred_hu   = denorm_hu(pred_norm)
+
+        # ------------------------------------------------------------------
+        # NEW STEP: Enforce Black Background (HU = -1000) outside the mask
+        # ------------------------------------------------------------------
+        BACKGROUND_HU = -1000.0
+
+        # Ensure mask is a binary float array (1=inside, 0=outside)
+        mask_binary = (mask > 0).astype(np.float32)
+        
+        # Apply the mask: keep prediction inside mask, set to -1000 outside
+        pred_hu_masked = pred_hu * mask_binary + BACKGROUND_HU * (1 - mask_binary)
+        pred_hu = pred_hu_masked 
+        # ------------------------------------------------------------------
 
         # Evaluate metrics
         mae = metrics.mae(gt, pred_hu, mask)
