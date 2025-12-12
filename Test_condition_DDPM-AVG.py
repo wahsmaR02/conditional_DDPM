@@ -115,17 +115,21 @@ def sliding_window_inference(model, sampler, cbct_norm, device, batch_size=4, nu
 
             patch_sum_sct_batch = torch.zeros_like(batch_cbct) # CISSI ADDED: Accumulator
 
-            # CISSI ADDS STOCHASTIC NOISE FOR DDPM-AVG
-            batch_noise = torch.randn_like(batch_cbct) # ADD: Stochastic noise x_T
-
-            # Concatenate condition and noise
-            x_in = torch.cat((batch_noise, batch_cbct), dim=1)  # (B, 2, D, H, W)
+            # Cissi adds loop to perform DDPM-AVG
+            for n in range(num_samples_to_avg): # ADDED: DDPM-avg loop start
             
-            # Process entire batch at once! 
-            x_out = sampler(x_in)  # (B, 1, D, H, W)
+                # CISSI ADDS STOCHASTIC NOISE FOR DDPM-AVG
+                batch_noise = torch.randn_like(batch_cbct) # ADD: Stochastic noise x_T
 
-            # Added for stochastic DDPM-AVG
-            patch_sum_sct_batch += x_out # ADD: Accumulate stochastic sample
+                # Concatenate condition and noise
+                x_in = torch.cat((batch_noise, batch_cbct), dim=1)  # (B, 2, D, H, W)
+            
+                # Process entire batch at once! 
+                x_out = sampler(x_in)  # (B, 1, D, H, W)
+
+                # Added for stochastic DDPM-AVG
+                patch_sum_sct_batch += x_out # ADD: Accumulate stochastic sample
+            
             avg_pred_patch_batch = patch_sum_sct_batch / num_samples_to_avg # ADD: Compute average
             
             # Distribute results back to output volume
