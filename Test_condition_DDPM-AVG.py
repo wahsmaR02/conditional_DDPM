@@ -153,9 +153,15 @@ def main():
     # --------------------------
     split_file = os.path.join(save_dir, "test_split.json")
     with open(split_file) as f:
-        test_ids = set(json.load(f))
+        # CISSI EDITS TO HAVE COHORT + PID
+        # test_ids = set(json.load(f))
+        test_entries = json.load(f)
+        split_keys = {(entry["cohort"], entry["pid"]) for entry in test_entries}
 
-    print(f"Loaded {len(test_ids)} test IDs from JSON.")
+
+    # print(f"Loaded {len(test_ids)} test IDs from JSON.")
+    print(f"Loaded {len(split_keys)} test patients from JSON.")
+
 
     # --------------------------
     # Create dataset using split='test'
@@ -169,10 +175,11 @@ def main():
         test_frac=0.2,
         seed=42,
     )
-
-    # Filter to ensure exact match with saved split
+    # CISSI EDITS TO GET COHORT + PID
+    # Filter to ensure exact match with saved split (cohort + pid)
     test_dataset.patients = [
-        p for p in test_dataset.patients if p["pid"] in test_ids
+        #p for p in test_dataset.patients if p["pid"] in test_ids
+        p for p in test_dataset.patients if (p["cohort"], p["pid"]) in split_keys
     ]
 
     print(f"Filtered dataset contains {len(test_dataset.patients)} patients.")
