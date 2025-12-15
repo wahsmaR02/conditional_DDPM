@@ -42,14 +42,20 @@ torch.cuda.manual_seed_all(SEED)    # <------ added
 # Utility functions
 # --------------------------
 
-def norm_hu_inference(arr: np.ndarray, lo: float = -1000, hi: float = 2000) -> np.ndarray:
-    #lo, hi = -1000, 2000
-    #arr = np.clip(arr, lo, hi)   <--- REMOVING CLIPPING
-    return (2.0 * (arr - lo) / (hi - lo) - 1.0)
+def norm_ct_from_hu(x, lo=-1024.0, hi=2000.0):
+    return (2.0 * (x - lo) / (hi - lo) - 1.0).astype(np.float32)
 
-def denorm_hu(x):
-    lo, hi = -1000, 2000
-    return ((x + 1) / 2) * (hi - lo) + lo
+def denorm_ct_to_hu(x_norm, lo=-1024.0, hi=2000.0):
+    return (((x_norm + 1.0) / 2.0) * (hi - lo) + lo).astype(np.float32)
+    
+def norm_cbct(arr, mask, p_lo = 0.5, p_hi=99.5, eps=1e-6):
+    m = mask > 0
+    if m.sum() < 10:
+        lo, hi = np.percentile(arr, [p_lo, p_hi])
+    else:
+        lo, hi = np.percentile(arr[m], [p_lo, p_hi])
+    arr = np.clip(arr, lo, hi)
+    return (2.0 * (arr - lo) / (hi - lo + eps) - 1.0).astype(np.float32)
 
 
 def sliding_window_inference(model, sampler, cbct_norm, device):
@@ -191,11 +197,11 @@ def main():
             mask = np.ones_like(gt, dtype=np.float32)
 
         # Normalize
-        cbct_norm = norm_hu_inference(cbct)
+        cbct_norm = norm_cbct(cbct, mask)
 
         # Predict full synthetic CT
         pred_norm = sliding_window_inference(model, sampler, cbct_norm, device)
-        pred_hu   = denorm_hu(pred_norm)
+        pred_hu   = denorm_ct_to_hu(pred_norm)
 
         # Evaluate metrics
         mae = metrics.mae(gt, pred_hu, mask)
