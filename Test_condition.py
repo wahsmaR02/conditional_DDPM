@@ -199,7 +199,8 @@ def main():
             mask = np.ones_like(gt, dtype=np.float32)
 
         # Normalize
-        cbct_norm = norm_cbct(cbct, mask)
+        #cbct_norm = norm_cbct(cbct, mask)
+        cbct_norm = norm_ct_from_hu(cbct, x, lo=-1024.0, hi=2000.0)
 
         # Predict full synthetic CT
         pred_norm = sliding_window_inference(model, sampler, cbct_norm, device)
