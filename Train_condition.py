@@ -355,13 +355,16 @@ for epoch in range(1, num_epochs + 1):
         ct = batch["pCT"].to(device)
         cbct = batch["CBCT"].to(device)
 
+        # <<< NEW LINE: Extract and move mask to device >>>
+        mask = batch["mask"].to(device)
+
         x_0 = torch.cat((ct, cbct), dim=1)  # [B,2,D,H,W]
 
         # clear old gradients
         optimizer.zero_grad()
 
-        # forward diffusion training step
-        loss, numel = trainer(x_0)
+        # <<< REQUIRED NEW LINE 2: Pass mask to trainer >>>
+        loss, numel = trainer(x_0, mask=mask)
 
         # convert to mean loss (per voxel)
         loss = loss / numel
@@ -396,8 +399,14 @@ for epoch in range(1, num_epochs + 1):
             ct = batch["pCT"].to(device)
             cbct = batch["CBCT"].to(device)
 
+            # <<< REQUIRED NEW LINE: Extract and move mask to device >>>
+            mask = batch["mask"].to(device) 
+
             x_0 = torch.cat((ct, cbct), dim=1)
-            loss, numel = trainer(x_0)
+            
+            # <<< REQUIRED NEW LINE: Pass mask to trainer >>>
+            loss, numel = trainer(x_0, mask=mask)
+
             loss = loss / numel
             val_loss += loss.item()
 
