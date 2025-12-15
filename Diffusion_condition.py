@@ -77,23 +77,13 @@ class GaussianDiffusionTrainer_cond(nn.Module):
 # --- MODIFIED: Masked Loss Calculation ---
         if mask is not None:
             # Ensure mask is correct shape [B, 1, D, H, W] and on device
-            if mask.ndim == 4:
-                mask_t = mask.unsqueeze(1).float().to(device)
-            else:
-                mask_t = mask.float().to(device) # assumes already [B, 1, D, H, W]
-
-            # Apply mask to both prediction and target noise
-            eps_pred_masked = eps_pred * mask_t
-            noise_masked = noise * mask_t
-
-            # Calculate total sum of squared errors over the masked region
-            loss = F.mse_loss(eps_pred_masked, noise_masked, reduction='sum')
-
-            # numel is the count of all voxels inside the mask (total number of relevant elements)
-            numel = mask_t.sum()
+            mask_t = mask.float().to(device)
+            if mask_t.ndim == 4:
+                mask_t = mask_t.unsqueeze(1)  # [B,1,D,H,W]
+            loss = ((eps_pred - noise) ** 2 * mask_t).sum()
+            numel = mask_t.sum().clamp(min=1.0)
         else:
-            # Original unmasked loss (fallback)
-            loss = F.mse_loss(eps_pred, noise, reduction='sum')
+            loss = F.mse_loss(eps_pred, noise, reduction="sum")
             numel = noise.numel()
         # --- END MODIFIED ---
 
