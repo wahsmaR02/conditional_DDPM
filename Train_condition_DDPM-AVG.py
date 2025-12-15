@@ -59,7 +59,7 @@ beta_T = 0.02                 # End of beta schedule
 # DDPM-AVG Configuration
 N_SAMPLES_TO_AVG = 5  # <--- NEW: Number of stochastic samples to average during validation
 
-save_dir = "./Checkpoints_3D"  # Where to save all checkpoints and logs
+save_dir = "./Checkpoints_3D_DDPM-AVG"  # Where to save all checkpoints and logs
 os.makedirs(save_dir, exist_ok=True)
 
 
