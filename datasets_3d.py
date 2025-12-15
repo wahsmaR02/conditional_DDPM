@@ -70,9 +70,9 @@ def collect_patients(root: str,
 
 def split_patients_train_val_test(
     patients: List[Dict],
-    train_frac: float = 0.6,
+    train_frac: float = 0.2,
     val_frac: float = 0.2,
-    test_frac: float = 0.2,
+    test_frac: float = 0.6,
     seed: int = 42
 ) -> Tuple[List[Dict], List[Dict], List[Dict]]:
     """
@@ -122,9 +122,9 @@ class VolumePatchDataset3D(Dataset):
         split: str = "train",
         patch_size: Tuple[int, int, int] = (96, 128, 128),
         cohorts: Tuple[str, ...] = ("HN", "TH", "AB"),
-        train_frac: float = 0.6,
+        train_frac: float = 0.2,
         val_frac: float = 0.2,
-        test_frac: float = 0.2,
+        test_frac: float = 0.6,
         seed: int = 42,
         max_tries: int = 50,
         patches_per_patient: int = 1,
@@ -258,7 +258,7 @@ class VolumePatchDataset3D(Dataset):
             if mask[zc, yc, xc] > 0:
                 return z0, y0, x0
 
-        print("⚠️  Could not find valid patch inside mask, using central patch")
+        print("OBS! Could not find valid patch inside mask, using central patch")
         return (
             max(0, (D - pD) // 2),
             max(0, (H - pH) // 2),

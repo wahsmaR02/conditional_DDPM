@@ -51,7 +51,7 @@ grad_clip = 1.0               # Max gradient norm for clipping
 T = 1000                       # Number of diffusion steps
 ch = 64                      # Base UNet channel count
 ch_mult = [1, 2, 3, 4]           # Channel multipliers per UNet level
-attn = [2]                    # Levels with attention (index into ch_mult)
+attn = [] #[2]                    # Levels with attention (index into ch_mult)
 num_res_blocks = 2            # ResBlocks per level
 dropout = 0.3                 # Dropout rate
 beta_1 = 1e-4                 # Start of beta schedule
@@ -277,7 +277,8 @@ def compute_val_metrics(model,
 
         # Start reverse diffusion with noise for CT + real CBCT
         generator = torch.Generator(device=device).manual_seed(seed + i)  # Different seed per batch, but consistent across epochs
-        noise = torch.randn_like(ct, generator=generator)
+        #noise = torch.randn_like(ct, generator=generator)
+        noise = torch.randn(ct.shape, device=device, dtype=ct.dtype, generator=generator) #randn_like fungerar inte på denna version av PyTorch!
         x_T = torch.cat((noise, cbct), dim=1)  # [B,2,D,H,W]
 
         # Sample reconstructed CT
@@ -432,7 +433,7 @@ for epoch in range(1, num_epochs + 1):
 
         # --- 2. EARLY STOPPING CHECK ---
         if patience_counter >= patience_limit:
-            print(f"🛑 Early stopping triggered! MAE has not improved for {patience_limit * 5} epochs.")
+            print(f"Early stopping triggered! MAE has not improved for {patience_limit * 5} epochs.")
             break # Exit the training loop
 
         # --- 3. PERIODIC SAVING ---
