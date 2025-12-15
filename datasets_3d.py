@@ -19,17 +19,14 @@ import SimpleITK as sitk
 # Helper functions
 # ==============================
 
-def norm_hu(arr: np.ndarray, 
-            lo: float = -1000, 
-            hi: float = 2000,
-            clip: bool = True) -> np.ndarray: # <--- ADDED 'clip' ARGUMENT
-    """
-    Conditionally clips Hounsfield units to [lo, hi] and scales to [-1,1].
-    """
-    if clip:                                  # <--- CONDITIONAL CLIPPING
-        arr = np.clip(arr, lo, hi)
-        
+def norm_ct(arr, lo=-1024, hi=2000): 
     return (2.0 * (arr - lo) / (hi - lo) - 1.0).astype(np.float32)
+
+def norm_cbct(arr, mask, p_lo = 0.5, p_hi=99.5, eps=1e-6):
+    m = mask > 0
+    lo, hi = np.percentile(arr[m], [p_lo, p_hi])
+    arr = np.clip(arr, lo, hi)
+    return (2.0 * (arr - lo) / (hi - lo + eps) - 1.0).astype(np.float32)
 
 
 def collect_patients(root: str,
@@ -191,29 +188,24 @@ class VolumePatchDataset3D(Dataset):
     # Loading volumes with caching
     # ------------------------------
 
-    def _load_volume(self, path: str, is_hu: bool = True) -> np.ndarray:
+    def _load_volume(self, path: str) -> np.ndarray:
         """
-        Load volume with caching.
+        Load volume (raw float32) with caching.
         """
         if path.endswith("cbct.mha"):
             cache = self._cache_cbct
         else:
             cache = self._cache_ct
-
+                    
         if path not in cache:
             img = sitk.ReadImage(path)
-            arr = sitk.GetArrayFromImage(img).astype(np.float32)
-            if is_hu and self.normalize_hu:
-                arr = norm_hu(arr)
-            cache[path] = arr
-
+            cache[path] = sitk.GetArrayFromImage(img).astype(np.float32)
         return cache[path]
 
     def _load_mask(self, path: str) -> np.ndarray:
         if path not in self._cache_mask:
             img = sitk.ReadImage(path)
-            arr = sitk.GetArrayFromImage(img).astype(np.uint8)
-            self._cache_mask[path] = arr
+            self._cache_mask[path] = sitk.GetArrayFromImage(img).astype(np.uint8)
         return self._cache_mask[path]
 
     # ------------------------------
@@ -255,7 +247,8 @@ class VolumePatchDataset3D(Dataset):
             yc = y0 + pH // 2
             xc = x0 + pW // 2
 
-            if mask[zc, yc, xc] > 0:
+            mask_patch = mask[z0:z0+pD, y0:y0+pH, x0:x0+pW] # to reduce background-heavy patches
+            if (mask[zc, yc, xc] > 0) and mask_patch.mean() > 0.2):
                 return z0, y0, x0
 
         print("⚠️  Could not find valid patch inside mask, using central patch")
@@ -274,8 +267,8 @@ class VolumePatchDataset3D(Dataset):
         patient_index = idx % self.n_patients
         pinfo = self.patients[patient_index]
 
-        cbct = self._load_volume(pinfo["cbct_path"], is_hu=True)
-        ct   = self._load_volume(pinfo["ct_path"],   is_hu=True)
+        cbct = self._load_volume(pinfo["cbct_path"])
+        ct   = self._load_volume(pinfo["ct_path"])
         mask = self._load_mask(pinfo["mask_path"])
 
         assert cbct.shape == ct.shape == mask.shape
@@ -286,6 +279,10 @@ class VolumePatchDataset3D(Dataset):
         cbct_patch = cbct[z0:z0+pD, y0:y0+pH, x0:x0+pW]
         ct_patch   = ct[z0:z0+pD, y0:y0+pH, x0:x0+pW]
         mask_patch = mask[z0:z0+pD, y0:y0+pH, x0:x0+pW]
+
+        if self.normalize_hu:
+            ct_patch = norm_ct(ct_patch, lo=-1024, hi=2000)
+            cbct_patch = norm_cbct(cbct_patch, mask_patch, p_lo=0.5, p_hi=99.5)
 
         return {
             "CBCT": torch.from_numpy(cbct_patch).unsqueeze(0),
