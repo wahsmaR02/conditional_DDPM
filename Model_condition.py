@@ -100,7 +100,7 @@ class UpSample(nn.Module):
 
     def forward(self, x, temb):
         # x: [B, C, D, H, W]
-        x = F.interpolate(x, scale_factor=(1, 2, 2), mode="trilinear") #trilinear neighbor interpolation
+        x = F.interpolate(x, scale_factor=(1, 2, 2), mode="trilinear", align_corners=False) #trilinear neighbor interpolation
         x = self.main(x) #[B, C, D, 2*H, 2*W] -> [B, C, D, 2*H, 2*W]
         return x
 
