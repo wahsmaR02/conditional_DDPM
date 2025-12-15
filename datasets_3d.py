@@ -282,7 +282,7 @@ class VolumePatchDataset3D(Dataset):
 
         if self.normalize_hu:
             ct_patch = norm_ct(ct_patch, lo=-1024, hi=2000)
-            cbct_patch = norm_cbct(cbct_patch, mask_patch, p_lo=0.5, p_hi=99.5)
+            cbct_patch = norm_ct(cbct_patch, lo=-1024, hi=2000)
 
         return {
             "CBCT": torch.from_numpy(cbct_patch).unsqueeze(0),
