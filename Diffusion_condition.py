@@ -35,7 +35,7 @@ class GaussianDiffusionTrainer_cond(nn.Module):
         self.register_buffer('sqrt_alphas_bar', torch.sqrt(alphas_bar))
         self.register_buffer('sqrt_one_minus_alphas_bar', torch.sqrt(1. - alphas_bar))
 
-    def forward(self, x_0):
+    def forward(self, x_0, mask=None): # ADD mask=None argument
         """
         x_0: [B, 2, D, H, W]
         returns: scalar loss
@@ -71,9 +71,33 @@ class GaussianDiffusionTrainer_cond(nn.Module):
         eps_pred = self.model(x_t, t)        # [B, 1, D, H, W]
         #print("[Diffusion] eps_pred:", eps_pred.shape)
 
-        loss = F.mse_loss(eps_pred, noise, reduction='sum')
-        return loss, noise.numel()
+        #loss = F.mse_loss(eps_pred, noise, reduction='sum')
+        #return loss, noise.numel()
 
+# --- MODIFIED: Masked Loss Calculation ---
+        if mask is not None:
+            # Ensure mask is correct shape [B, 1, D, H, W] and on device
+            if mask.ndim == 4:
+                mask_t = mask.unsqueeze(1).float().to(device)
+            else:
+                mask_t = mask.float().to(device) # assumes already [B, 1, D, H, W]
+
+            # Apply mask to both prediction and target noise
+            eps_pred_masked = eps_pred * mask_t
+            noise_masked = noise * mask_t
+
+            # Calculate total sum of squared errors over the masked region
+            loss = F.mse_loss(eps_pred_masked, noise_masked, reduction='sum')
+
+            # numel is the count of all voxels inside the mask (total number of relevant elements)
+            numel = mask_t.sum()
+        else:
+            # Original unmasked loss (fallback)
+            loss = F.mse_loss(eps_pred, noise, reduction='sum')
+            numel = noise.numel()
+        # --- END MODIFIED ---
+
+        return loss, numel
 
 class GaussianDiffusionSampler_cond(nn.Module):
     """
