@@ -74,7 +74,7 @@ def sliding_window_inference(model, sampler, cbct_norm, device):
     # Generate deterministic noise   <----- removing this here (Cissi 10/12)
     #g = torch.Generator(device=device)# <-- DELETE
     #g.manual_seed(SEED)# <-- DELETE
-    noise = torch.randn(patch_cbct.shape, device=device, generator=noise_generator)
+    #noise = torch.randn(patch_cbct.shape, device=device, generator=noise_generator)
 
     output_sum  = torch.zeros((D, H, W), device=device)
     output_count = torch.zeros((D, H, W), device=device)
@@ -102,17 +102,19 @@ def sliding_window_inference(model, sampler, cbct_norm, device):
             # Generate deterministic noise   <----- removing this here (Cissi 10/12)
             #g = torch.Generator(device=device)# <-- DELETE
             #g.manual_seed(SEED)# <-- DELETE
-            noise = torch.randn(patch_cbct.shape, device=device, generator=noise_generator) # <-- REPLACED with persistent generator)
+            #noise = torch.randn(patch_cbct.shape, device=device, generator=noise_generator) # <-- REPLACED with persistent generator)
+            noise = torch.randn_like(patch_cbct)  
 
             x_in = torch.cat((noise, patch_cbct), dim=1)
             x_out = sampler(x_in)
 
-            pred_patch = x_out[:, 0, :, :, :].squeeze(0)
+            #pred_patch = x_out[:, 0, :, :, :].squeeze(0)
+            pred_patch = x_out[0, 0]   # -> [pD, pH, pW]
 
             output_sum[z:z+pD, y:y+pH, x:x+pW] += pred_patch
             output_count[z:z+pD, y:y+pH, x:x+pW] += 1
 
-    result = output_sum / output_count
+    result = output_sum / output_count.clamp(min=1) # la till .clamp(min=1), se om det blir bättre
     return result.cpu().numpy()
 
 
