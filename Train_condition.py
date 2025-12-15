@@ -225,13 +225,13 @@ def save_clean(model, path):
 # (inverse of datasets_3d.norm_hu)
 # --------------------------
 def denorm_hu(x_norm: torch.Tensor,
-              lo: float = -1000.0,
+              lo: float = -1024.0,
               hi: float = 2000.0) -> np.ndarray:
     """
     x_norm: torch tensor in [-1,1]
     returns: numpy array in HU
     """
-    x = x_norm.cpu().numpy()
+    x = x_norm.detach().cpu().numpy()
     hu = ( (x + 1.0) / 2.0 ) * (hi - lo) + lo
     return hu.astype(np.float32)
 
@@ -278,6 +278,7 @@ def compute_val_metrics(model,
         # Start reverse diffusion with noise for CT + real CBCT
         generator = torch.Generator(device=device).manual_seed(seed + i)  # Different seed per batch, but consistent across epochs
         noise = torch.randn_like(ct, generator=generator)
+        # noise = torch.randn(ct.shape, device=device, dtype=ct.dtype, generator=generator) # could be safer to use...
         x_T = torch.cat((noise, cbct), dim=1)  # [B,2,D,H,W]
 
         # Sample reconstructed CT
@@ -356,7 +357,9 @@ for epoch in range(1, num_epochs + 1):
         cbct = batch["CBCT"].to(device)
 
         # <<< NEW LINE: Extract and move mask to device >>>
-        mask = batch["mask"].to(device)
+        #mask = batch["mask"].to(device)
+        mask = batch["mask"].to(device).unsqueeze(1)  # [B,1,D,H,W]
+
 
         x_0 = torch.cat((ct, cbct), dim=1)  # [B,2,D,H,W]
 
@@ -400,7 +403,9 @@ for epoch in range(1, num_epochs + 1):
             cbct = batch["CBCT"].to(device)
 
             # <<< REQUIRED NEW LINE: Extract and move mask to device >>>
-            mask = batch["mask"].to(device) 
+            #mask = batch["mask"].to(device) 
+            mask = batch["mask"].to(device).unsqueeze(1)  # [B,1,D,H,W]
+
 
             x_0 = torch.cat((ct, cbct), dim=1)
             
