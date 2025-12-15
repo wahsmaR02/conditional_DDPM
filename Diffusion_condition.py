@@ -150,9 +150,7 @@ class GaussianDiffusionSampler_cond(nn.Module):
         ct = x_t[:, 0].unsqueeze(1)  # [B, 1, D, H, W]
 
         # posterior variance schedule
-        # FIX: Use the analytically correct posterior variance (tilde_beta_t) for all steps
-        var_schedule = self.posterior_var
-        # var_schedule = torch.cat([self.posterior_var[1:2], self.betas[1:]])
+        var_schedule = torch.cat([self.posterior_var[1:2], self.betas[1:]])
         var = extract(var_schedule, t, ct.shape)
 
         # model predicts epsilon given current x_t and timestep t
