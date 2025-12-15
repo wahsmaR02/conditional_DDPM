@@ -248,7 +248,7 @@ class VolumePatchDataset3D(Dataset):
             xc = x0 + pW // 2
 
             mask_patch = mask[z0:z0+pD, y0:y0+pH, x0:x0+pW] # to reduce background-heavy patches
-            if (mask[zc, yc, xc] > 0) and mask_patch.mean() > 0.2):
+            if (mask[zc, yc, xc] > 0) and (mask_patch.mean() > 0.2):
                 return z0, y0, x0
 
         print("⚠️  Could not find valid patch inside mask, using central patch")
