@@ -69,13 +69,13 @@ def gaussian_weight_3d(patch_size, sigma_frac=0.125):
     return (weights / weights.max()).astype(np.float32)
 
 def norm_hu(x):
-    lo, hi = -1000, 2000
+    lo, hi = -1024, 2000
     x = np.clip(x, lo, hi)
     return 2 * (x - lo) / (hi - lo) - 1
 
 
 def denorm_hu(x):
-    lo, hi = -1000, 2000
+    lo, hi = -1024, 2000
     return ((x + 1) / 2) * (hi - lo) + lo
 
 
