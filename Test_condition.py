@@ -70,7 +70,7 @@ def gaussian_weight_3d(patch_size, sigma_frac=0.125):
 
 def norm_hu(x):
     lo, hi = -1024, 2000
-    x = np.clip(x, lo, hi)
+    #x = np.clip(x, lo, hi)
     return 2 * (x - lo) / (hi - lo) - 1
 
 
