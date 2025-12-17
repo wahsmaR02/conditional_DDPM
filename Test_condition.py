@@ -52,7 +52,7 @@ def denorm_hu(x):
     return ((x + 1) / 2) * (hi - lo) + lo
 
 
-def sliding_window_inference(model, sampler, cbct_norm, device, batch_size=4):
+def sliding_window_inference(model, sampler, cbct_norm, device, mask: np.ndarray , batch_size=4):
     """
     Runs sliding-window inference over the full CBCT volume using spatially
     consisten (global) noise and batched patch processing.
@@ -85,6 +85,15 @@ def sliding_window_inference(model, sampler, cbct_norm, device, batch_size=4):
 
     patches = sorted(set((z, y, x) for z in z_idx for y in y_idx for x in x_idx))
 
+    if mask is None:
+        patches = all_patches
+    else:
+        patches = []
+        for z, y, x in all_patches:
+            mask_patch = mask[z:z+pD, y:y+pH, x:x+pW]
+            if np.any(mask_patch > 0):
+                patches.append((z, y, x))
+                
     print(f"  -> Running {len(patches)} patches in batches of {batch_size}...")
 
     model.eval()
@@ -216,7 +225,7 @@ def main():
         cbct_norm = norm_hu(cbct)
 
         # Predict full synthetic CT
-        pred_norm = sliding_window_inference(model, sampler, cbct_norm, device)
+        pred_norm = sliding_window_inference(model, sampler, cbct_norm, device, mask)
         pred_hu   = denorm_hu(pred_norm)
 
         # Evaluate metrics
