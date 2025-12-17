@@ -1,17 +1,11 @@
-# CBCT2CT_cDDPM
-Official repo of CBCT-Based synthetic CT image generation using conditional denoising diffusion probabilistic model. Med Phys. 2023; 1-13. https://doi.org/10.1002/mp.16704
+# Conditional DDPM for CBCT-to-CT Synthesis
+This repository contains code developed for a course project focused on generating synthesized CT (sCT) images from CBCT volumes using conditional diffusion models.
 
-It is also a general framework for any image-to-image translation task using a conditional denoising diffusion probabilistic model.
+The project is based on the Synthrad2025 Challenge (Task 2), and the dataset is retrieved from there. 
 
+The backbone of this implementation is adapted from an existing open-source conditional DDPM repository: 
 
-- datasets.py
-- Diffusion_condition.py
-- Model_condition.py
-- Train_condition.py
+https://github.com/junbopeng/conditional_DDPM/tree/main
 
-If you find it helpful to your project, please cite our paper: Peng J, Qiu RLJ, Wynne JF, et al. CBCT-Based synthetic CT image generation using conditional denoising diffusion probabilistic model. Med Phys. 2023; 1-13. https://doi.org/10.1002/mp.16704
-
-#updated Jan. 9, 2025
-The script for the inference stage has been uploaded.
-- Test_condition.py
+The original code has been modified and extended, including adaption to 3D volumetric data. 
 
