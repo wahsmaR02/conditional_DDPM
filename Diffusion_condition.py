@@ -179,5 +179,6 @@ class GaussianDiffusionSampler_cond(nn.Module):
             assert torch.isnan(x_t).int().sum() == 0, "nan in tensor."
 
         x_0 = x_t
-        return torch.clip(x_0, -1, 1)
+        #return torch.clip(x_0, -1, 1)
+        return x_0
 
