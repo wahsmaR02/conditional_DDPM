@@ -6,6 +6,7 @@ import torch
 import SimpleITK as sitk
 from tqdm import tqdm
 from torch.utils.data import DataLoader
+from scipy.signal import windows
 
 from Model_condition import UNet
 from Diffusion_condition import GaussianDiffusionSampler_cond
@@ -42,6 +43,27 @@ torch.cuda.manual_seed_all(SEED)
 # Utility functions
 # --------------------------
 
+# For weighted average
+def gaussian_weight_3d(patch_size, sigma_frac=0.125):
+    """Creates a 3D Gaussian weight map for smooth patch blending."""
+    pD, pH, pW = patch_size
+    
+    def gaussian_1d(length):
+        if length == 1: return np.array([1.0])
+        # Use sigma based on a fraction of the length for smooth decay
+        sigma = length * sigma_frac
+        g = windows.gaussian(length, std=sigma)
+        return g
+
+    gD = gaussian_1d(pD)
+    gH = gaussian_1d(pH)
+    gW = gaussian_1d(pW)
+    
+    # Outer product to create 3D weight map
+    weights = gD[:, None, None] * gH[None, :, None] * gW[None, None, :]
+    # Normalize to ensure max value is 1.0
+    return (weights / weights.max()).astype(np.float32)
+
 def norm_hu(x):
     lo, hi = -1024, 2000
     return 2 * (x - lo) / (hi - lo) - 1
@@ -66,6 +88,10 @@ def sliding_window_inference(model, sampler, cbct_norm, device, mask: np.ndarray
 
     cbct_t = torch.from_numpy(cbct_norm).float().to(device)
 
+    # 1. Prepare Gaussian Weight Map (Transfer to GPU once)
+    weight_map_np = gaussian_weight_3d(patch_size)
+    weight_map = torch.from_numpy(weight_map_np).float().to(device)
+
     # global deterministic noise field
     noise_generator = torch.Generator(device=device).manual_seed(SEED)
     noise_full = torch.randn((1, 1, D, H, W), device=device, generator=noise_generator)
@@ -83,18 +109,21 @@ def sliding_window_inference(model, sampler, cbct_norm, device, mask: np.ndarray
     if y_idx[-1] != H - pH: y_idx.append(H - pH)
     if x_idx[-1] != W - pW: x_idx.append(W - pW)
 
-    min_coverage = 0.10  # 10% of voxels in patch must be inside mask
-
     all_patches = sorted(set((z, y, x) for z in z_idx for y in y_idx for x in x_idx))
 
-    if mask is None:
-        patches = all_patches
-    else:
-        patches = []
-        for z, y, x in all_patches:
-            mask_patch = mask[z:z+pD, y:y+pH, x:x+pW]
-            if (mask_patch > 0).mean() >= min_coverage:
-                patches.append((z, y, x))
+    # A patch is considered relevant if any voxel within its bounding box 
+    # is part of the patient mask (value > 0).
+    relevant_patches = []
+    
+    for z, y, x in all_patches:
+        # Extract the patch region from the mask
+        mask_patch = mask[z:z+pD, y:y+pH, x:x+pW]
+        
+        # Check if any part of the mask patch is non-zero
+        if np.any(mask_patch > 0):
+            relevant_patches.append((z, y, x))
+            
+    patches = relevant_patches # Use the filtered list for the loop
                 
     print(f"  -> Running {len(patches)} patches in batches of {batch_size}...")
 
@@ -132,10 +161,11 @@ def sliding_window_inference(model, sampler, cbct_norm, device, mask: np.ndarray
             # Distribute results back to output volume
             for i, (z, y, x) in enumerate(batch_coords):
                 pred_patch = x_out[i, 0, :, :, :]  # Extract i-th result
-                output_sum[z:z+pD, y:y+pH, x:x+pW] += pred_patch
-                output_count[z:z+pD, y:y+pH, x:x+pW] += 1
+                output_sum[z:z+pD, y:y+pH, x:x+pW] += pred_patch * weight_map
+                output_count[z:z+pD, y:y+pH, x:x+pW] += weight_map
     
-    result = output_sum / output_count
+    # Final result: Weighted sum divided by accumulated weights
+    result = torch.where(output_weights > 0, output_sum / output_weights, output_sum)
     return result.cpu().numpy()
 
 
@@ -230,11 +260,24 @@ def main():
         pred_norm = sliding_window_inference(model, sampler, cbct_norm, device, mask)
         pred_hu   = denorm_hu(pred_norm)
 
-        # Evaluate metrics
-        mae = metrics.mae(gt, pred_hu, mask)
-        print(f"  → MAE = {mae:.2f}")
+         # ------------------------------------------------------------------
+        # NEW STEP: Enforce Black Background (HU = -1000) outside the mask
+        # ------------------------------------------------------------------
+        BACKGROUND_HU = -1000.0
 
-        results.append({"pid": pid, "mae": mae})
+        # Ensure mask is a binary float array (1=inside, 0=outside)
+        mask_binary = (mask > 0).astype(np.float32)
+        
+        # Apply the mask: keep prediction inside mask, set to -1000 outside
+        pred_hu_masked = pred_hu * mask_binary + BACKGROUND_HU * (1 - mask_binary)
+        pred_hu = pred_hu_masked 
+        # ------------------------------------------------------------------
+
+        # Evaluate metrics
+        #mae = metrics.mae(gt, pred_hu, mask)
+        #print(f"  → MAE = {mae:.2f}")
+
+        #results.append({"pid": pid, "mae": mae})
 
         # Save synthetic CT
         out_img = sitk.GetImageFromArray(pred_hu)
@@ -244,11 +287,11 @@ def main():
     # --------------------------
     # Summary
     # --------------------------
-    if results:
-        avg_mae = np.mean([r["mae"] for r in results])
-        print("\n===================================")
-        print(f" FINAL AVERAGE MAE on TEST SET = {avg_mae:.2f}")
-        print("===================================")
+    #if results:
+    #    avg_mae = np.mean([r["mae"] for r in results])
+    #    print("\n===================================")
+    #    print(f" FINAL AVERAGE MAE on TEST SET = {avg_mae:.2f}")
+    #    print("===================================")
 
 
 if __name__ == "__main__":
