@@ -185,11 +185,12 @@ def sliding_window_inference(model, sampler, cbct_norm, device, mask: np.ndarray
             # Concatenate: Noise(1) + CBCT(1) + Coords(3) = 5 Channels
             x_in = torch.cat((batch_noise, batch_cbct, batch_coords), dim=1) 
             
-            # Run Inference
-            x_out = sampler(x_in) # (B, 5, ...)
-
-            # Extract only the CT channel (Channel 0)
-            pred_ct_batch = x_out[:, 0, ...]
+            # Run Inference (with AMP)
+            with torch.amp.autocast('cuda'):
+                x_out = sampler(x_in)
+            
+            # Cast back to float32
+            pred_ct_batch = x_out[:, 0, ...].float()
             
             # Distribute results with GAUSSIAN WEIGHTING
             for i, (z, y, x) in enumerate(batch_coords_list):
