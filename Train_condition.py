@@ -137,7 +137,7 @@ train_loader = DataLoader(
     train_dataset,
     batch_size=batch_size,
     shuffle=True,          # Shuffle patches during training
-    num_workers=0,
+    num_workers=4,
     pin_memory=True,
     persistent_workers=False,
 )
@@ -146,7 +146,7 @@ val_loader = DataLoader(
     val_dataset,
     batch_size=batch_size,
     shuffle=False,         # Validation must be deterministic
-    num_workers=0,
+    num_workers=4,
 )
 
 #test_loader = DataLoader(
