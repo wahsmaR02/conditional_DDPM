@@ -179,7 +179,7 @@ def main():
     # --------------------------
     split_file = os.path.join(save_dir, "test_split.json")
     with open(split_file) as f:
-        test_ids = set(json.load(f))
+        test_ids = set(p["pid"] for p in json.load(f))
 
     print(f"Loaded {len(test_ids)} test IDs from JSON.")
 
