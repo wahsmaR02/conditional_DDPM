@@ -342,7 +342,7 @@ patience_limit = 15     # Stop if MAE doesn't improve for 15 validation checks (
 patience_counter = 0    # Tracks how many checks we've gone without improvement
 prev_time = time.time()
 
-#accum_steps = 1  # will increase automatically if needed
+accum_steps = 4  # will increase automatically if needed
 
 for epoch in range(1, num_epochs + 1):
 
@@ -351,6 +351,9 @@ for epoch in range(1, num_epochs + 1):
     # --------------------------
     model.train()
     train_loss = 0.0
+
+    # 1. Initialize Scaler before the loop <----- ADD FOR AMP
+    scaler = torch.cuda.amp.GradScaler()
 
     for batch in train_loader:
 
@@ -366,28 +369,35 @@ for epoch in range(1, num_epochs + 1):
         # clear old gradients
         optimizer.zero_grad()
 
-        # <<< REQUIRED NEW LINE 2: Pass mask to trainer >>>
-        loss, numel = trainer(x_0, mask=mask)
+        # 2. Wrap Forward Pass in Autocast <---- ADDED FOR AMP
+        with torch.amp.autocast('cuda'):
+            loss, numel = trainer(x_0, mask=mask)
+            # Normalize loss for accumulation
+            loss = (loss / numel) / accum_steps
 
-        # convert to mean loss (per voxel)
-        loss = loss / numel
+        # 3. Scale the Backward Pass
+        scaler.scale(loss).backward()
+
+        # 4. Step with Scaler
+        if (i + 1) % accum_steps == 0:
+            # Unscale gradients first to allow clipping
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         
-        #loss = loss / accum_steps
-
-        # backprop
-        loss.backward()
-
-        # NOTE: train_loader._index is a bit hacky; if it breaks, replace with a manual counter.
-        #if (batch_idx := getattr(train_loader, "_index", 0)) % accum_steps == 0:
-        #    torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-        #    optimizer.step()
-        #    optimizer.zero_grad()
+            # Step the optimizer using the scaler
+            scaler.step(optimizer)
+        
+            # Update the scaler's internal scaling factor
+            scaler.update()
+        
+            optimizer.zero_grad()
 
         # clip gradients and update weights (ONE STEP PER BACTH)
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         optimizer.step()
 
-        train_loss += loss.item()
+        # Multiply back by accum_steps for logging only (so it matches validation scale)
+        train_loss += loss.item() * accum_steps
 
     train_loss /= len(train_loader)
 
@@ -401,13 +411,12 @@ for epoch in range(1, num_epochs + 1):
         for batch in val_loader:
             ct = batch["pCT"].to(device)
             cbct = batch["CBCT"].to(device)
+            coords = batch["coords"].to(device)
 
             # <<< REQUIRED NEW LINE: Extract and move mask to device >>>
-            #mask = batch["mask"].to(device) 
             mask = batch["mask"].to(device).unsqueeze(1)  # [B,1,D,H,W]
 
-
-            x_0 = torch.cat((ct, cbct), dim=1)
+            x_0 = torch.cat((ct, cbct, coords), dim=1)
             
             # <<< REQUIRED NEW LINE: Pass mask to trainer >>>
             loss, numel = trainer(x_0, mask=mask)
