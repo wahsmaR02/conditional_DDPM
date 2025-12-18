@@ -355,7 +355,9 @@ for epoch in range(1, num_epochs + 1):
     # 1. Initialize Scaler before the loop <----- ADD FOR AMP
     scaler = torch.cuda.amp.GradScaler()
 
-    for batch in train_loader:
+    optimizer.zero_grad()
+
+    for i, batch in enumerate(train_loader):
 
         ct = batch["pCT"].to(device)
         cbct = batch["CBCT"].to(device)
@@ -365,9 +367,6 @@ for epoch in range(1, num_epochs + 1):
         coords = batch["coords"].to(device)  # <--- 2. Load Coordinates
 
         x_0 = torch.cat((ct, cbct, coords), dim=1)  # [B,5,D,H,W]
-
-        # clear old gradients
-        optimizer.zero_grad()
 
         # 2. Wrap Forward Pass in Autocast <---- ADDED FOR AMP
         with torch.amp.autocast('cuda'):
