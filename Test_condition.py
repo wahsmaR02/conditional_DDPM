@@ -83,7 +83,9 @@ def sliding_window_inference(model, sampler, cbct_norm, device, mask: np.ndarray
     if y_idx[-1] != H - pH: y_idx.append(H - pH)
     if x_idx[-1] != W - pW: x_idx.append(W - pW)
 
-    patches = sorted(set((z, y, x) for z in z_idx for y in y_idx for x in x_idx))
+    min_coverage = 0.10  # 10% of voxels in patch must be inside mask
+
+    all_patches = sorted(set((z, y, x) for z in z_idx for y in y_idx for x in x_idx))
 
     if mask is None:
         patches = all_patches
@@ -91,7 +93,7 @@ def sliding_window_inference(model, sampler, cbct_norm, device, mask: np.ndarray
         patches = []
         for z, y, x in all_patches:
             mask_patch = mask[z:z+pD, y:y+pH, x:x+pW]
-            if np.any(mask_patch > 0):
+            if (mask_patch > 0).mean() >= min_coverage:
                 patches.append((z, y, x))
                 
     print(f"  -> Running {len(patches)} patches in batches of {batch_size}...")
