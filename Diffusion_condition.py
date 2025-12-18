@@ -35,7 +35,7 @@ class GaussianDiffusionTrainer_cond(nn.Module):
         self.register_buffer('sqrt_alphas_bar', torch.sqrt(alphas_bar))
         self.register_buffer('sqrt_one_minus_alphas_bar', torch.sqrt(1. - alphas_bar))
 
-    def forward(self, x_0):
+    def forward(self, x_0, mask=None): # ADD mask=None argument
         """
         x_0: [B, 2, D, H, W]
         returns: scalar loss
@@ -53,7 +53,7 @@ class GaussianDiffusionTrainer_cond(nn.Module):
         cbct = x_0[:, 1].unsqueeze(1)  # [B, 1, D, H, W]
 
         #print("[Diffusion] CT:", ct.shape)
-       # print("[Diffusion] CBCT:", cbct.shape)
+        # print("[Diffusion] CBCT:", cbct.shape)
 
         # sample Gaussian noise
         noise = torch.randn_like(ct)
@@ -71,9 +71,23 @@ class GaussianDiffusionTrainer_cond(nn.Module):
         eps_pred = self.model(x_t, t)        # [B, 1, D, H, W]
         #print("[Diffusion] eps_pred:", eps_pred.shape)
 
-        loss = F.mse_loss(eps_pred, noise, reduction='sum')
-        return loss, noise.numel()
+        #loss = F.mse_loss(eps_pred, noise, reduction='sum')
+        #return loss, noise.numel()
 
+# --- MODIFIED: Masked Loss Calculation ---
+        if mask is not None:
+            # Ensure mask is correct shape [B, 1, D, H, W] and on device
+            mask_t = mask.float().to(device)
+            if mask_t.ndim == 4:
+                mask_t = mask_t.unsqueeze(1)  # [B,1,D,H,W]
+            loss = ((eps_pred - noise) ** 2 * mask_t).sum()
+            numel = mask_t.sum().clamp(min=1.0)
+        else:
+            loss = F.mse_loss(eps_pred, noise, reduction="sum")
+            numel = noise.numel()
+        # --- END MODIFIED ---
+
+        return loss, numel
 
 class GaussianDiffusionSampler_cond(nn.Module):
     """
@@ -165,5 +179,4 @@ class GaussianDiffusionSampler_cond(nn.Module):
             assert torch.isnan(x_t).int().sum() == 0, "nan in tensor."
 
         x_0 = x_t
-        return torch.clip(x_0, -1, 1)
-
+        return x_0 #torch.clip(x_0, -1, 1)
