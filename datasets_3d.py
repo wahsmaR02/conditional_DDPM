@@ -22,13 +22,6 @@ import SimpleITK as sitk
 def norm_ct(arr, lo=-1024, hi=2000): 
     return (2.0 * (arr - lo) / (hi - lo) - 1.0).astype(np.float32)
 
-def norm_cbct(arr, mask, p_lo = 0.5, p_hi=99.5, eps=1e-6):
-    m = mask > 0
-    lo, hi = np.percentile(arr[m], [p_lo, p_hi])
-    arr = np.clip(arr, lo, hi)
-    return (2.0 * (arr - lo) / (hi - lo + eps) - 1.0).astype(np.float32)
-
-
 def collect_patients(root: str,
                      cohorts: Tuple[str, ...] = ("HN", "TH", "AB")) -> List[Dict]:
     """
