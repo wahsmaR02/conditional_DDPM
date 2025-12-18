@@ -133,9 +133,9 @@ class VolumePatchDataset3D(Dataset):
         self.seed = seed  # <--- ADD THIS LINE
 
         # Caches for full volumes
-        self._cache_cbct = {}
-        self._cache_ct = {}
-        self._cache_mask = {}
+        #self._cache_cbct = {}
+        #self._cache_ct = {}
+        #self._cache_mask = {}
 
         # RNG for patch sampling
         self._torch_rng = torch.Generator()
@@ -185,21 +185,27 @@ class VolumePatchDataset3D(Dataset):
         """
         Load volume (raw float32) with caching.
         """
-        if path.endswith("cbct.mha"):
-            cache = self._cache_cbct
-        else:
-            cache = self._cache_ct
+        #if path.endswith("cbct.mha"):
+            #cache = self._cache_cbct
+        #else:
+            #cache = self._cache_ct
                     
-        if path not in cache:
-            img = sitk.ReadImage(path)
-            cache[path] = sitk.GetArrayFromImage(img).astype(np.float32)
-        return cache[path]
+        #if path not in cache:
+            #img = sitk.ReadImage(path)
+            #cache[path] = sitk.GetArrayFromImage(img).astype(np.float32)
+        #return cache[path]
+    
+        img = sitk.ReadImage(path)
+        return sitk.GetArrayFromImage(img).astype(np.float32)
 
     def _load_mask(self, path: str) -> np.ndarray:
-        if path not in self._cache_mask:
-            img = sitk.ReadImage(path)
-            self._cache_mask[path] = sitk.GetArrayFromImage(img).astype(np.uint8)
-        return self._cache_mask[path]
+        #if path not in self._cache_mask:
+            #img = sitk.ReadImage(path)
+            #self._cache_mask[path] = sitk.GetArrayFromImage(img).astype(np.uint8)
+        #return self._cache_mask[path]
+        
+        img = sitk.ReadImage(path)
+        return sitk.GetArrayFromImage(img).astype(np.uint8)
 
     # ------------------------------
     # Patch sampling helpers
