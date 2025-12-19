@@ -99,8 +99,8 @@ def sliding_window_inference(model, sampler, cbct_norm, device, mask: np.ndarray
     noise_generator = torch.Generator(device=device).manual_seed(SEED)
     noise_full = torch.randn((1, 1, D, H, W), device=device, generator=noise_generator)
 
-    output_sum   = torch.zeros((D, H, W), device=device)
-    output_weights = torch.zeros((D, H, W), device=device)
+    output_sum = torch.zeros((D, H, W), device=device, dtype=torch.float32) 
+    output_weights = torch.zeros((D, H, W), device=device, dtype=torch.float32)
 
     # Compute valid patch starting indices
     z_idx = list(range(0, D - pD + 1, sD))
