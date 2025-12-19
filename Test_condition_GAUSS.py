@@ -19,7 +19,7 @@ from SynthRAD_metrics import ImageMetrics
 # --------------------------
 dataset_root = "/mnt/asgard0/users/p25_2025/synthRAD2025_Task2_Train/synthRAD2025_Task2_Train/Task2"
 save_dir = "./Checkpoints_3D"
-output_dir = "./test_results_3d"
+output_dir = "./test_results_3d_CBB_GAUSS"
 os.makedirs(output_dir, exist_ok=True)
 
 #patch_size = (64, 128, 128)
@@ -193,7 +193,7 @@ def sliding_window_inference(model, sampler, cbct_norm, device, mask: np.ndarray
             pred_ct_batch = x_out[:, 0, ...].float()
             
             # Distribute results with GAUSSIAN WEIGHTING
-            for i, (z, y, x) in enumerate(batch_coords_list):
+            for i, (z, y, x) in enumerate(batch_coords):
                 pred_patch = pred_ct_batch[i]
                 
                 # Accumulate Weighted Prediction
