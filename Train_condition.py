@@ -344,6 +344,9 @@ prev_time = time.time()
 
 accum_steps = 4  # will increase automatically if needed
 
+# 1. Initialize Scaler before the loop <----- ADD FOR AMP
+scaler = torch.cuda.amp.GradScaler()
+
 for epoch in range(1, num_epochs + 1):
 
     # --------------------------
@@ -351,9 +354,6 @@ for epoch in range(1, num_epochs + 1):
     # --------------------------
     model.train()
     train_loss = 0.0
-
-    # 1. Initialize Scaler before the loop <----- ADD FOR AMP
-    scaler = torch.cuda.amp.GradScaler()
 
     optimizer.zero_grad()
 
