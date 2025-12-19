@@ -307,14 +307,14 @@ def main():
         pred_hu   = denorm_hu(pred_norm)
 
         # ------------------------------------------------------------------
-        # NEW STEP: Enforce Black Background (HU = -1000) outside the mask
+        # NEW STEP: Enforce Black Background (HU = -1024) outside the mask
         # ------------------------------------------------------------------
-        BACKGROUND_HU = -1000.0
+        BACKGROUND_HU = -1024.0
 
         # Ensure mask is a binary float array (1=inside, 0=outside)
         mask_binary = (mask > 0).astype(np.float32)
         
-        # Apply the mask: keep prediction inside mask, set to -1000 outside
+        # Apply the mask: keep prediction inside mask, set to -1024 outside
         pred_hu_masked = pred_hu * mask_binary + BACKGROUND_HU * (1 - mask_binary)
         pred_hu = pred_hu_masked 
         # ------------------------------------------------------------------
