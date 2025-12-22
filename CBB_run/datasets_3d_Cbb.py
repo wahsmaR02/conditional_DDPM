@@ -19,7 +19,7 @@ import SimpleITK as sitk
 # Helper functions
 # ==============================
 
-def norm_ct(arr, lo=-1024, hi=2000): 
+def norm_ct(arr, lo=-1024, hi=3000): 
     return (2.0 * (arr - lo) / (hi - lo) - 1.0).astype(np.float32)
 
 def collect_patients(root: str,
@@ -309,8 +309,8 @@ class VolumePatchDataset3D(Dataset):
         # ---------------------------------------------------------
 
         if self.normalize_hu:
-            ct_patch = norm_ct(ct_patch, lo=-1024, hi=2000)
-            cbct_patch = norm_ct(cbct_patch, lo=-1024, hi=2000)
+            ct_patch = norm_ct(ct_patch, lo=-1024, hi=3000)
+            cbct_patch = norm_ct(cbct_patch, lo=-1024, hi=3000)
 
         return {
             "CBCT": torch.from_numpy(cbct_patch).unsqueeze(0),
