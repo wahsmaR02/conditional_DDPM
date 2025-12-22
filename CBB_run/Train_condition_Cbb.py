@@ -226,7 +226,7 @@ def save_clean(model, path):
 # --------------------------
 def denorm_hu(x_norm: torch.Tensor,
               lo: float = -1024.0,
-              hi: float = 2000.0) -> np.ndarray:
+              hi: float = 3000.0) -> np.ndarray:
     """
     x_norm: torch tensor in [-1,1]
     returns: numpy array in HU
