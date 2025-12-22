@@ -117,7 +117,7 @@ class VolumePatchDataset3D(Dataset):
         test_frac: float = 0.2,
         seed: int = 42,
         max_tries: int = 50,
-        patches_per_patient: int = 1,
+        patches_per_patient: int = 8,
         normalize_hu: bool = True,
     ):
         super().__init__()
