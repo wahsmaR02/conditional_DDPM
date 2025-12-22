@@ -373,7 +373,7 @@ for epoch in range(1, num_epochs + 1):
 
         # 2. Wrap Forward Pass in Autocast <---- ADDED FOR AMP
         with torch.amp.autocast('cuda'):
-            loss, numel = trainer(x_0, mask=mask)
+            loss, numel = trainer(x_0, mask=None)
             # Normalize loss for accumulation
             loss = (loss / numel) / accum_steps
 
@@ -425,7 +425,7 @@ for epoch in range(1, num_epochs + 1):
             x_0 = torch.cat((ct, cbct, coords), dim=1)
             
             # <<< REQUIRED NEW LINE: Pass mask to trainer >>>
-            loss, numel = trainer(x_0, mask=mask)
+            loss, numel = trainer(x_0, mask=None)
 
             loss = loss / numel
             val_loss += loss.item()
