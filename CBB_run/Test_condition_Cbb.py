@@ -194,6 +194,12 @@ def sliding_window_inference(model, sampler, cbct_norm, device, mask: np.ndarray
             
             # Cast back to float32
             pred_ct_batch = x_out[:, 0, ...].float()
+
+            # LA TILL CLAMPING HÄR (TAR BORT SALT & PEPPER NOISE)
+            # -1.0  = -1024 HU (Air)
+            # +2.0  = ~3500 HU (Metal)
+
+            pred_ct_batch = torch.clamp(pred_ct_batch, -1.0, 2.0)
             
             # Distribute results with GAUSSIAN WEIGHTING
             for i, (z, y, x) in enumerate(batch_coords):
