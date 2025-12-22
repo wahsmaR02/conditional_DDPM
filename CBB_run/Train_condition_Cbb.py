@@ -385,6 +385,10 @@ for epoch in range(1, num_epochs + 1):
             # Unscale gradients first to allow clipping
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+            
+            # Calculate gradient norm for debugging
+            total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+            print(f"Gradient norm: {total_norm:.4f}")  # Should be < 1.0 typically
         
             # Step the optimizer using the scaler
             scaler.step(optimizer)
@@ -395,8 +399,8 @@ for epoch in range(1, num_epochs + 1):
             optimizer.zero_grad()
 
         # clip gradients and update weights (ONE STEP PER BACTH)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-        optimizer.step()
+        #torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+        #optimizer.step()
 
         # Multiply back by accum_steps for logging only (so it matches validation scale)
         train_loss += loss.item() * accum_steps
