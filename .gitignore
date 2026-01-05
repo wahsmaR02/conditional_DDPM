@@ -1,7 +1,7 @@
 # Ignore large data and generated files
 *.mha
 *.nii.gz
-*.png
+#*.png
 .DS_Store
 
 # Ignore preprocessed data folders
