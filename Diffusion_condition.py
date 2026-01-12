@@ -21,7 +21,7 @@ class GaussianDiffusionTrainer_cond(nn.Module):
 
     Expects x_0 of shape [B, 2, D, H, W]:
       - channel 0: clean CT
-      - channel 1: CBCT (conditioning)
+      - Channel 1+: Conditioning (CBCT, Coords, etc.)
     """
     def __init__(self, model, beta_1, beta_T, T):
         super().__init__()
@@ -35,9 +35,9 @@ class GaussianDiffusionTrainer_cond(nn.Module):
         self.register_buffer('sqrt_alphas_bar', torch.sqrt(alphas_bar))
         self.register_buffer('sqrt_one_minus_alphas_bar', torch.sqrt(1. - alphas_bar))
 
-    def forward(self, x_0):
+    def forward(self, x_0, mask=None): # ADD mask=None argument
         """
-        x_0: [B, 2, D, H, W]
+        x_0: [B, 5, D, H, W] (CT + CBCT + 3 Coords)
         returns: scalar loss
         """
         #print("\n[Diffusion] x_0:", x_0.shape)   # <-- PRINT HERE
@@ -49,8 +49,10 @@ class GaussianDiffusionTrainer_cond(nn.Module):
         t = torch.randint(self.T, size=(B,), device=device)
 
         # split CT and CBCT, keep all 3D spatial dims
-        ct   = x_0[:, 0].unsqueeze(1)  # [B, 1, D, H, W]
-        cbct = x_0[:, 1].unsqueeze(1)  # [B, 1, D, H, W]
+        # Channel 0 is the target (CT)
+        # Channels 1:End are the condition (CBCT + Coords)
+        ct   = x_0[:, 0:1]  # [B, 1, D, H, W]
+        cond = x_0[:, 1:]   # [B, 4, D, H, W]
 
         #print("[Diffusion] CT:", ct.shape)
        # print("[Diffusion] CBCT:", cbct.shape)
@@ -64,16 +66,37 @@ class GaussianDiffusionTrainer_cond(nn.Module):
 
       #  print("[Diffusion] x_t:", x_t.shape)
 
-        # concatenate noisy CT with conditioning CBCT
-        x_t = torch.cat((x_t, cbct), dim=1)  # [B, 2, D, H, W]
+        # concatenate noisy CT with conditioning (CBCT+Coords)
+        x_t = torch.cat((x_t, cond), dim=1)  # [B, 5, D, H, W]
 
         # model predicts epsilon for CT channel (epsilon is the noise that was added to the CT image during the forward diffusion process.)
-        eps_pred = self.model(x_t, t)        # [B, 1, D, H, W]
+        eps_pred = self.model(x_t, t)
         #print("[Diffusion] eps_pred:", eps_pred.shape)
 
-        loss = F.mse_loss(eps_pred, noise, reduction='sum')
-        return loss, noise.numel()
+        #loss = F.mse_loss(eps_pred, noise, reduction='sum')
+        #return loss, noise.numel()
 
+# --- MODIFIED: Masked Loss Calculation ---
+        if mask is not None:
+            # Ensure mask is correct shape [B, 1, D, H, W] and on device
+            mask_t = mask.float().to(device)
+            if mask_t.ndim == 4:
+                mask_t = mask_t.unsqueeze(1)  # [B,1,D,H,W]
+
+            # Compute Squared Error per pixel
+            squared_error = (eps_pred - noise) ** 2
+            
+            # Zero out background loss
+            loss = (squared_error * mask_t).sum()
+            
+            # Count only valid pixels to avoid overly small loss
+            numel = mask_t.sum().clamp(min=1.0)
+        else:
+            loss = F.mse_loss(eps_pred, noise, reduction="sum")
+            numel = noise.numel()
+        # --- END MODIFIED ---
+
+        return loss, numel
 
 class GaussianDiffusionSampler_cond(nn.Module):
     """
@@ -112,7 +135,9 @@ class GaussianDiffusionSampler_cond(nn.Module):
         x_t: [B, 2, D, H, W]
         eps: [B, 1, D, H, W] (predicted noise for CT)
         """
-        ct = x_t[:, 0].unsqueeze(1)  # [B, 1, D, H, W]
+        
+        # We only denoise channel 0 (CT)
+        ct = x_t[:, 0:1]
         assert ct.shape == eps.shape
 
         return (extract(self.coeff1, t, ct.shape) * ct -
@@ -123,7 +148,9 @@ class GaussianDiffusionSampler_cond(nn.Module):
         Compute mean and variance of p(x_{t-1} | x_t).
         -->Computes the mean and varince of the reverse diffusion process.
         """
-        ct = x_t[:, 0].unsqueeze(1)  # [B, 1, D, H, W]
+        
+        # Extract CT for variance calculation
+        ct = x_t[:, 0:1]
 
         # posterior variance schedule
         var_schedule = torch.cat([self.posterior_var[1:2], self.betas[1:]])
@@ -152,18 +179,27 @@ class GaussianDiffusionSampler_cond(nn.Module):
         B = x_T.shape[0]
         device = x_T.device
 
-        # split for shape convenience
-        ct   = x_t[:, 0].unsqueeze(1)  # [B, 1, D, H, W]
-        cbct = x_t[:, 1].unsqueeze(1)  # [B, 1, D, H, W]
+        # 1. Separate Condition (CBCT + Coords) once.
+        # These channels are NEVER added noise to, so we keep them aside.
+        cond = x_t[:, 1:] 
+        
+        # 2. Extract starting noisy CT
+        ct = x_t[:, 0:1]
 
         for time_step in reversed(range(self.T)):
             t = x_t.new_ones([B], dtype=torch.long, device=device) * time_step
+            
+            # We pass the FULL x_t (ct + cond) to the model
             mean, var = self.p_mean_variance(x_t=x_t, t=t)
+            
             noise = torch.randn_like(ct) if time_step > 0 else 0
             ct = mean + torch.sqrt(var) * noise
-            x_t = torch.cat((ct, cbct), dim=1)  # keep CBCT fixed
+            
+            # Re-concatenate with the fixed condition
+            x_t = torch.cat((ct, cond), dim=1)
+            
             assert torch.isnan(x_t).int().sum() == 0, "nan in tensor."
 
         x_0 = x_t
-        return torch.clip(x_0, -1, 1)
-
+        #return torch.clip(x_0, -1, 1)
+        return x_0
