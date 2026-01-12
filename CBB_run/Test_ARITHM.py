@@ -1,4 +1,4 @@
-# Test_condition.py
+# Test_condition.py (ARITHM)
 import os
 import json
 import numpy as np
@@ -18,8 +18,8 @@ from SynthRAD_metrics import ImageMetrics
 # Configuration
 # --------------------------
 dataset_root = "/mnt/asgard0/users/p25_2025/synthRAD2025_Task2_Train/synthRAD2025_Task2_Train/Task2"
-save_dir = "./Checkpoints_3D_Cbb"
-output_dir = "./test_results_3d_CBB_ARITHM"
+save_dir = "./Checkpoints_3D_Cbb_run2"
+output_dir = "./test_results_3d_CBB_run2_ARITHM"
 os.makedirs(output_dir, exist_ok=True)
 
 #patch_size = (64, 128, 128)
