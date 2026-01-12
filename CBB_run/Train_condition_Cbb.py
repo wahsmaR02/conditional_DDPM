@@ -5,7 +5,6 @@ import datetime
 import sys
 import random
 
-
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
@@ -14,12 +13,12 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 import matplotlib.pyplot as plt
 import json
 
-from Diffusion_condition_Cbb import (
+from Diffusion_condition import (
     GaussianDiffusionTrainer_cond,
     GaussianDiffusionSampler_cond,
 )
-from Model_condition_Cbb import UNet
-from datasets_3d_Cbb import VolumePatchDataset3D
+from Model_condition import UNet
+from datasets_3d import VolumePatchDataset3D
 
 # --------------------------
 # ADD: Path to SynthRAD2025 metrics
@@ -43,7 +42,7 @@ random.seed(42)
 dataset_root = "/mnt/asgard0/users/p25_2025/synthRAD2025_Task2_Train/synthRAD2025_Task2_Train/Task2"   # Root folder containing patient subfolders
 patch_size = (32, 96, 96)     # 3D patch shape (D, H, W)
 batch_size = 2                # Number of patches per batch
-num_epochs = 300               # Total training epochs
+num_epochs = 400               # Total training epochs
 learning_rate = 1e-4          # Optimizer learning rate
 grad_clip = 1.0               # Max gradient norm for clipping
 
@@ -51,14 +50,16 @@ grad_clip = 1.0               # Max gradient norm for clipping
 T = 1000                       # Number of diffusion steps
 ch = 64                      # Base UNet channel count
 ch_mult = [1, 2, 3, 4]           # Channel multipliers per UNet level
-attn = []                    # Levels with attention (index into ch_mult)
+attn = [] #[2]                    # Levels with attention (index into ch_mult)
 num_res_blocks = 2            # ResBlocks per level
 dropout = 0.3                 # Dropout rate
 beta_1 = 1e-4                 # Start of beta schedule
 beta_T = 0.02                 # End of beta schedule
 
+# DDPM-AVG Configuration
+N_SAMPLES_TO_AVG = 5  # <--- NEW: Number of stochastic samples to average during validation
 
-save_dir = "./Checkpoints_3D_Cbb"  # Where to save all checkpoints and logs
+save_dir = "./Checkpoints_3D_DDPM-AVG"  # Where to save all checkpoints and logs
 os.makedirs(save_dir, exist_ok=True)
 
 
@@ -137,7 +138,7 @@ train_loader = DataLoader(
     train_dataset,
     batch_size=batch_size,
     shuffle=True,          # Shuffle patches during training
-    num_workers=4,
+    num_workers=0,
     pin_memory=True,
     persistent_workers=False,
 )
@@ -146,7 +147,7 @@ val_loader = DataLoader(
     val_dataset,
     batch_size=batch_size,
     shuffle=False,         # Validation must be deterministic
-    num_workers=4,
+    num_workers=0,
 )
 
 #test_loader = DataLoader(
@@ -226,12 +227,12 @@ def save_clean(model, path):
 # --------------------------
 def denorm_hu(x_norm: torch.Tensor,
               lo: float = -1024.0,
-              hi: float = 3000.0) -> np.ndarray:
+              hi: float = 2000.0) -> np.ndarray:
     """
     x_norm: torch tensor in [-1,1]
     returns: numpy array in HU
     """
-    x = x_norm.detach().cpu().numpy()
+    x = x_norm.cpu().numpy()
     hu = ( (x + 1.0) / 2.0 ) * (hi - lo) + lo
     return hu.astype(np.float32)
 
@@ -246,7 +247,8 @@ def compute_val_metrics(model,
                         val_loader,
                         device,
                         max_batches=1,   # currently only doing 1 image
-                        seed: int = 42):
+                        seed: int = 42,
+                        num_samples_to_avg: int = N_SAMPLES_TO_AVG): # <--- Added param
     """
     Computes MAE, PSNR, MS-SSIM using SynthRAD2025 ImageMetrics
     on a subset of validation batches.
@@ -260,9 +262,10 @@ def compute_val_metrics(model,
     #psnr_vals = []
     #msssim_vals = []
 
-    # Fix RNG for deterministic sampling across epochs
     cpu_state = torch.get_rng_state()
     cuda_state = torch.cuda.get_rng_state() if torch.cuda.is_available() else None
+    
+    # We set the seed globally once here, but handle per-sample variation manually below
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
@@ -274,17 +277,37 @@ def compute_val_metrics(model,
         ct = batch["pCT"].to(device)      # [B,1,D,H,W], normalized [-1,1]
         cbct = batch["CBCT"].to(device)   # [B,1,D,H,W], normalized [-1,1]
         mask = batch["mask"].cpu().numpy()
-        coords = batch["coords"].to(device) # <--- 1. Get coords from validation batch
 
-        # Start reverse diffusion with noise for CT + real CBCT
-        generator = torch.Generator(device=device).manual_seed(seed + i)  # Different seed per batch, but consistent across epochs
-        #noise = torch.randn_like(ct, generator=generator)
-        noise = torch.randn(ct.shape, device=device, dtype=ct.dtype, generator=generator) # could be safer to use...
-        x_T = torch.cat((noise, cbct, coords), dim=1)  # [B,5,D,H,W]
+        # Initialize accumulator for DDPM-AVG
+        pred_accum = torch.zeros_like(ct)
 
-        # Sample reconstructed CT
-        x_0 = sampler(x_T)                 # [B,2,D,H,W]
-        pred_ct = x_0[:, 0:1, ...]         # [B,1,D,H,W]
+        # ---------------------------------------------------------
+        # DDPM-AVG LOOP
+        # ---------------------------------------------------------
+        # We ensure that for a specific batch index 'i', the sequence of noise 
+        # generated is identical across epochs, but different for each 'k'.
+        base_seed = seed + (i * 1000)
+
+        for k in range(num_samples_to_avg):
+            # 1. Deterministic seed per averaging step
+            step_seed = base_seed + k
+            generator = torch.Generator(device=device).manual_seed(step_seed)
+
+            # 2. Generate Stochastic Noise
+            noise = torch.randn(ct.shape, device=device, dtype=ct.dtype, generator=generator)
+
+            # 3. Concatenate (Noise + Condition)
+            x_T = torch.cat((noise, cbct), dim=1)  # [B,2,D,H,W]
+
+            # 4. Sample
+            x_out = sampler(x_T)             # [B,2,D,H,W]
+            
+            # 5. Accumulate (Channel 0 is the predicted CT)
+            pred_accum += x_out[:, 0:1, ...]
+
+        # 6. Compute Average
+        pred_ct = pred_accum / num_samples_to_avg
+        # ---------------------------------------------------------
 
         # Denormalize to HU for metrics
         gt_np = denorm_hu(ct).squeeze(1)       # [B,D,H,W]
@@ -296,30 +319,15 @@ def compute_val_metrics(model,
             pred_vol = pred_np[b]
             mask_vol = mask[b].astype(np.float32)
 
-            # Use a mask of all ones (patch-based; no body mask here)
-            # mask = np.ones_like(gt_vol, dtype=np.float32)
-
             mae = metrics.mae(gt_vol, pred_vol, mask_vol)
-            # Print intensity statistics for verification
-            print(f"  GT range:      min={gt_vol.min():.2f}, max={gt_vol.max():.2f}, mean={gt_vol.mean():.2f}")
-            print(f"  Pred HU range: min={pred_vol.min():.2f}, max={pred_vol.max():.2f}, mean={pred_vol.mean():.2f}")
-            #psnr = metrics.psnr(gt_vol, pred_vol, mask, use_population_range=True)
-            #_, ms_ssim_mask = metrics.ms_ssim(gt_vol, pred_vol, mask)
-
             mae_vals.append(mae)
-            #psnr_vals.append(psnr)
-            #msssim_vals.append(ms_ssim_mask)
 
-    # Restore RNG
+    # Restore RNG state to not affect training loop
     torch.set_rng_state(cpu_state)
     if torch.cuda.is_available() and cuda_state is not None:
         torch.cuda.set_rng_state(cuda_state)
 
     mean_mae = float(np.mean(mae_vals)) if mae_vals else float("nan")
-    #mean_psnr = float(np.mean(psnr_vals)) if psnr_vals else float("nan")
-    #mean_msssim = float(np.mean(msssim_vals)) if msssim_vals else float("nan")
-
-    #return mean_mae, mean_psnr, mean_msssim
     return mean_mae
 
 
@@ -345,10 +353,7 @@ patience_limit = 15     # Stop if MAE doesn't improve for 15 validation checks (
 patience_counter = 0    # Tracks how many checks we've gone without improvement
 prev_time = time.time()
 
-accum_steps = 4  # will increase automatically if needed
-
-# 1. Initialize Scaler before the loop <----- ADD FOR AMP
-scaler = torch.cuda.amp.GradScaler()
+#accum_steps = 1  # will increase automatically if needed
 
 for epoch in range(1, num_epochs + 1):
 
@@ -358,52 +363,40 @@ for epoch in range(1, num_epochs + 1):
     model.train()
     train_loss = 0.0
 
-    optimizer.zero_grad()
-
-    for i, batch in enumerate(train_loader):
+    for batch in train_loader:
 
         ct = batch["pCT"].to(device)
         cbct = batch["CBCT"].to(device)
 
-        # <<< NEW LINE: Extract and move mask & coords to device >>>
-        mask = batch["mask"].to(device)      # <--- 1. Load Mask
-        coords = batch["coords"].to(device)  # <--- 2. Load Coordinates
+        mask = batch["mask"].to(device).float().unsqueeze(1) # [B, 1, D, H, W]
 
-        x_0 = torch.cat((ct, cbct, coords), dim=1)  # [B,5,D,H,W]
+        x_0 = torch.cat((ct, cbct), dim=1)  # [B,2,D,H,W]
 
-        # 2. Wrap Forward Pass in Autocast <---- ADDED FOR AMP
-        with torch.amp.autocast('cuda'):
-            loss, numel = trainer(x_0, mask=None)
-            # Normalize loss for accumulation
-            loss = (loss / numel) / accum_steps
+        # clear old gradients
+        optimizer.zero_grad()
 
-        # 3. Scale the Backward Pass
-        scaler.scale(loss).backward()
+        # forward diffusion training step
+        loss, numel = trainer(x_0, mask=mask)
 
-        # 4. Step with Scaler
-        if (i + 1) % accum_steps == 0:
-            # Unscale gradients first to allow clipping
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-            
-            # Calculate gradient norm for debugging
-            total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-            print(f"Gradient norm: {total_norm:.4f}")  # Should be < 1.0 typically
+        # convert to mean loss (per voxel)
+        loss = loss / numel
         
-            # Step the optimizer using the scaler
-            scaler.step(optimizer)
-        
-            # Update the scaler's internal scaling factor
-            scaler.update()
-        
-            optimizer.zero_grad()
+        #loss = loss / accum_steps
+
+        # backprop
+        loss.backward()
+
+        # NOTE: train_loader._index is a bit hacky; if it breaks, replace with a manual counter.
+        #if (batch_idx := getattr(train_loader, "_index", 0)) % accum_steps == 0:
+        #    torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+        #    optimizer.step()
+        #    optimizer.zero_grad()
 
         # clip gradients and update weights (ONE STEP PER BACTH)
-        #torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-        #optimizer.step()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+        optimizer.step()
 
-        # Multiply back by accum_steps for logging only (so it matches validation scale)
-        train_loss += loss.item() * accum_steps
+        train_loss += loss.item()
 
     train_loss /= len(train_loader)
 
@@ -417,16 +410,11 @@ for epoch in range(1, num_epochs + 1):
         for batch in val_loader:
             ct = batch["pCT"].to(device)
             cbct = batch["CBCT"].to(device)
-            coords = batch["coords"].to(device)
 
-            # <<< REQUIRED NEW LINE: Extract and move mask to device >>>
-            mask = batch["mask"].to(device).unsqueeze(1)  # [B,1,D,H,W]
+            mask = batch["mask"].to(device).float().unsqueeze(1) # [B, 1, D, H, W]
 
-            x_0 = torch.cat((ct, cbct, coords), dim=1)
-            
-            # <<< REQUIRED NEW LINE: Pass mask to trainer >>>
-            loss, numel = trainer(x_0, mask=None)
-
+            x_0 = torch.cat((ct, cbct), dim=1)
+            loss, numel = trainer(x_0, mask=mask)
             loss = loss / numel
             val_loss += loss.item()
 
@@ -439,12 +427,12 @@ for epoch in range(1, num_epochs + 1):
     # epoch_msssim = None <-- Removed from assignment
     
     # --- PERIODIC & BEST MODEL CHECK ---
-    if epoch % 30 == 0:
-        print("Computing validation MAE...")
+    if epoch % 10 == 0:
+        print("Computing validation MAE (DDPM-avg={N_SAMPLES_TO_AVG})...")
         
         # Capture only MAE (since compute_val_metrics was updated to return only MAE)
         epoch_mae = compute_val_metrics(
-            model, sampler, val_loader, device, max_batches=1 
+            model, sampler, val_loader, device, max_batches=1,num_samples_to_avg=N_SAMPLES_TO_AVG 
         )
         print(f"Epoch {epoch} — Val MAE: {epoch_mae:.4f}")
 
@@ -531,7 +519,7 @@ plt.figure(figsize=(8, 5))
 plt.plot(xs, ys, marker='o')
 plt.xlabel("Epoch")
 plt.ylabel("MAE")
-plt.title("Validation MAE Over Epochs")
+plt.title(f"Validation MAE (DDPM-avg={N_SAMPLES_TO_AVG}) Over Epochs")
 plt.grid(True)
 plt.savefig(os.path.join(save_dir, "Val_MAE.png"))
 plt.close()
