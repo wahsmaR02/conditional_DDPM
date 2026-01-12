@@ -100,7 +100,7 @@ class UpSample(nn.Module):
 
     def forward(self, x, temb):
         # x: [B, C, D, H, W]
-        x = F.interpolate(x, scale_factor=(1, 2, 2), mode="trilinear", align_corners=False) #trilinear neighbor interpolation
+        x = F.interpolate(x, scale_factor=(1, 2, 2), mode="nearest") #nearest neighbor interpolation
         x = self.main(x) #[B, C, D, 2*H, 2*W] -> [B, C, D, 2*H, 2*W]
         return x
 
@@ -210,21 +210,24 @@ class ResBlock(nn.Module):
 
 class UNet(nn.Module):
     """
-    Builds the UNet architecture for the conditional diffusion model.
-    3D conditional UNet:
-      input x: [B, 2, D, H, W]
-        - channel 0: noisy CT
-        - channel 1: CBCT (conditioning)
-      output: [B, 1, D, H, W] (epsilon for CT channel)
+    3D conditional UNet for diffusion-based CT reconstruction.
+    Modified to accept Coordinate inputs.
+    
+    New Input x: [B, 5, D, H, W]
+      - ch 0: Noisy CT
+      - ch 1: CBCT
+      - ch 2: Z coord
+      - ch 3: Y coord
+      - ch 4: X coord
     """
-    def __init__(self, T, ch, ch_mult, attn, num_res_blocks, dropout):
+    def __init__(self, T, ch, ch_mult, attn, num_res_blocks, dropout, in_ch=5):
         super().__init__()
         assert all([i < len(ch_mult) for i in attn]), "attn index out of bound"
         tdim = ch * 4
         self.time_embedding = TimeEmbedding(T, ch, tdim)
 
-        # 2 channels: CT + CBCT
-        self.head = nn.Conv3d(2, ch, kernel_size=3, stride=1, padding=1)
+        # CHANGED: Input channels is now dynamic (e.g., 5 instead of 2)
+        self.head = nn.Conv3d(in_ch, ch, kernel_size=3, stride=1, padding=1)
 
         self.downblocks = nn.ModuleList()
         chs = [ch]
@@ -320,4 +323,3 @@ class UNet(nn.Module):
         assert len(hs) == 0
         #print("[UNet] Output:", h.shape)
         return h
-
