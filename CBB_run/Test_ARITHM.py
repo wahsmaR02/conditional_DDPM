@@ -1,4 +1,4 @@
-# Test_condition.py (GAUSS)
+# Test_condition.py (ARITHM)
 import os
 import json
 import numpy as np
@@ -19,7 +19,7 @@ from SynthRAD_metrics import ImageMetrics
 # --------------------------
 dataset_root = "/mnt/asgard0/users/p25_2025/synthRAD2025_Task2_Train/synthRAD2025_Task2_Train/Task2"
 save_dir = "./Checkpoints_3D_Cbb_run2"
-output_dir = "./test_results_3d_CBB_run2_GAUSS"
+output_dir = "./test_results_3d_CBB_run2_ARITHM"
 os.makedirs(output_dir, exist_ok=True)
 
 #patch_size = (64, 128, 128)
@@ -44,27 +44,6 @@ torch.cuda.manual_seed_all(SEED)
 # --------------------------
 # Utility functions
 # --------------------------
-
-# ADD GAUSSIAN HELPER (for weighted average)
-def gaussian_weight_3d(patch_size, sigma_frac=0.125):
-    """Creates a 3D Gaussian weight map for smooth patch blending."""
-    pD, pH, pW = patch_size
-    
-    def gaussian_1d(length):
-        if length == 1: return np.array([1.0])
-        # Use sigma based on a fraction of the length for smooth decay
-        sigma = length * sigma_frac
-        g = windows.gaussian(length, std=sigma)
-        return g
-
-    gD = gaussian_1d(pD)
-    gH = gaussian_1d(pH)
-    gW = gaussian_1d(pW)
-    
-    # Outer product to create 3D weight map
-    weights = gD[:, None, None] * gH[None, :, None] * gW[None, None, :]
-    # Normalize to ensure max value is 1.0
-    return (weights / weights.max()).astype(np.float32)
 
 def norm_hu(x):
     lo, hi = -1024, 2000
@@ -91,16 +70,12 @@ def sliding_window_inference(model, sampler, cbct_norm, device, mask: np.ndarray
 
     cbct_t = torch.from_numpy(cbct_norm).float().to(device)
 
-    # 1. Prepare Gaussian Weight Map (Transfer to GPU once)
-    weight_map_np = gaussian_weight_3d(patch_size)
-    weight_map = torch.from_numpy(weight_map_np).float().to(device)
-
     # Global noise (deterministic)
     noise_generator = torch.Generator(device=device).manual_seed(SEED)
     noise_full = torch.randn((1, 1, D, H, W), device=device, generator=noise_generator)
 
     output_sum = torch.zeros((D, H, W), device=device, dtype=torch.float32) 
-    output_weights = torch.zeros((D, H, W), device=device, dtype=torch.float32)
+    output_count = torch.zeros((D, H, W), device=device, dtype=torch.float32)
 
     # Compute valid patch starting indices
     z_idx = list(range(0, D - pD + 1, sD))
@@ -183,7 +158,6 @@ def sliding_window_inference(model, sampler, cbct_norm, device, mask: np.ndarray
             #batch_coords = torch.stack(batch_coord_patches, dim=0)           # (B, 3, ...)
             batch_coords_tensor = torch.stack(batch_coord_patches, dim=0)
 
-
             # Concatenate: Noise(1) + CBCT(1) + Coords(3) = 5 Channels
             x_in = torch.cat((batch_noise, batch_cbct, batch_coords_tensor), dim=1) 
             
@@ -194,19 +168,20 @@ def sliding_window_inference(model, sampler, cbct_norm, device, mask: np.ndarray
             # Cast back to float32
             pred_ct_batch = x_out[:, 0, ...].float()
             
-            # Distribute results with GAUSSIAN WEIGHTING
+            # Distribute results with ARITHMETIC AVERAGING
             for i, (z, y, x) in enumerate(batch_coords):
                 pred_patch = pred_ct_batch[i]
                 
-                # Accumulate Weighted Prediction
-                output_sum[z:z+pD, y:y+pH, x:x+pW] += pred_patch * weight_map
+                # Accumulate Prediction (No weights)
+                output_sum[z:z+pD, y:y+pH, x:x+pW] += pred_patch
                 
-                # Accumulate Weights
-                output_weights[z:z+pD, y:y+pH, x:x+pW] += weight_map
+                # Accumulate Counts (Just add 1.0 everywhere the patch touches)
+                output_count[z:z+pD, y:y+pH, x:x+pW] += 1.0
     
-    # Final result: Weighted sum divided by accumulated weights
-    result = torch.where(output_weights > 0, output_sum / output_weights, output_sum)
-    
+    # Final result: Simple Average
+    # Avoid division by zero
+    result = torch.where(output_count > 0, output_sum / output_count, output_sum)
+  
     return result.cpu().numpy()
 
 
