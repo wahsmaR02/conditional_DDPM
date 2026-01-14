@@ -19,7 +19,7 @@ import SimpleITK as sitk
 # Helper functions
 # ==============================
 
-def norm_ct(arr, lo=-1024, hi=2000): 
+def norm_ct(arr, lo=-1024, hi=3000): 
     return (2.0 * (arr - lo) / (hi - lo) - 1.0).astype(np.float32)
 
 def norm_cbct(arr, mask, p_lo = 0.5, p_hi=99.5, eps=1e-6):
