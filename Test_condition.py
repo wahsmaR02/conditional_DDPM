@@ -42,10 +42,10 @@ torch.cuda.manual_seed_all(SEED)    # <------ added
 # Utility functions
 # --------------------------
 
-def norm_ct_from_hu(x, lo=-1024.0, hi=2000.0):
+def norm_ct_from_hu(x, lo=-1024.0, hi=3000.0):
     return (2.0 * (x - lo) / (hi - lo) - 1.0).astype(np.float32)
 
-def denorm_ct_to_hu(x_norm, lo=-1024.0, hi=2000.0):
+def denorm_ct_to_hu(x_norm, lo=-1024.0, hi=3000.0):
     return (((x_norm + 1.0) / 2.0) * (hi - lo) + lo).astype(np.float32)
     
 def norm_cbct(arr, mask, p_lo = 0.5, p_hi=99.5, eps=1e-6):
