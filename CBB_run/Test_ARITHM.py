@@ -46,13 +46,13 @@ torch.cuda.manual_seed_all(SEED)
 # --------------------------
 
 def norm_hu(x):
-    lo, hi = -1024, 2000
+    lo, hi = -1024, 3000
     #x = np.clip(x, lo, hi)
     return 2 * (x - lo) / (hi - lo) - 1
 
 
 def denorm_hu(x):
-    lo, hi = -1024, 2000
+    lo, hi = -1024, 3000
     return ((x + 1) / 2) * (hi - lo) + lo
 
 
